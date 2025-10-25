@@ -10,14 +10,15 @@
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",
+    "@supabase/supabase-js": "^2.76.1",
     "@whiskeysockets/baileys": "latest",
     "axios": "^1.8.4",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
+    "pino": "^8.16.0",
     "qrcode": "^1.5.3",
-    "qrcode-terminal": "^0.12.0",
-    "pino": "^8.16.0"
+    "qrcode-terminal": "^0.12.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",
