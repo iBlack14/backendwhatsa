@@ -7,7 +7,7 @@ import {
   disconnectSession,
 } from './whatsapp';
 import { CreateSessionRequest, SendMessageRequest } from './types';
-import easypanelService from './services/easypanel.service';
+import dockerService from './services/docker.service';
 import { createClient } from '@supabase/supabase-js';
 
 const router = Router();
@@ -342,16 +342,16 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
       });
     }
 
-    // Verificar si el servicio ya existe
-    const exists = await easypanelService.serviceExists(service_name);
+    // Verificar si el contenedor ya existe
+    const exists = await dockerService.containerExists(service_name);
     if (exists) {
       return res.status(400).json({ 
         error: 'A service with this name already exists' 
       });
     }
 
-    // Crear instancia en Easypanel
-    const result = await easypanelService.createN8nInstance({
+    // Crear instancia con Docker
+    const result = await dockerService.createN8nInstance({
       serviceName: service_name,
       userId: user_id,
       memory: memory || '256M',
@@ -374,11 +374,11 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
 
     if (supabaseError) {
       console.error('[Suite] Error saving to Supabase:', supabaseError);
-      // Intentar eliminar la instancia de Easypanel si falló guardar en Supabase
+      // Intentar eliminar el contenedor si falló guardar en Supabase
       try {
-        await easypanelService.deleteInstance(service_name);
+        await dockerService.deleteInstance(service_name);
       } catch (cleanupError) {
-        console.error('[Suite] Error cleaning up Easypanel instance:', cleanupError);
+        console.error('[Suite] Error cleaning up Docker container:', cleanupError);
       }
       throw supabaseError;
     }
@@ -414,7 +414,7 @@ router.post('/api/suite/init', async (req: Request, res: Response) => {
 
     console.log('[Suite] Starting instance:', name_service);
 
-    const result = await easypanelService.startInstance(name_service);
+    const result = await dockerService.startInstance(name_service);
 
     // Actualizar estado en Supabase
     await supabase
@@ -444,7 +444,7 @@ router.post('/api/suite/pause', async (req: Request, res: Response) => {
 
     console.log('[Suite] Pausing instance:', name_service);
 
-    const result = await easypanelService.pauseInstance(name_service);
+    const result = await dockerService.pauseInstance(name_service);
 
     // Actualizar estado en Supabase
     await supabase
@@ -474,8 +474,8 @@ router.post('/api/suite/delete', async (req: Request, res: Response) => {
 
     console.log('[Suite] Deleting instance:', name_service);
 
-    // Eliminar de Easypanel
-    const result = await easypanelService.deleteInstance(name_service);
+    // Eliminar contenedor Docker
+    const result = await dockerService.deleteInstance(name_service);
 
     // Eliminar de Supabase
     await supabase
@@ -498,7 +498,7 @@ router.post('/api/suite/delete', async (req: Request, res: Response) => {
 router.get('/api/suite/status/:serviceName', async (req: Request, res: Response) => {
   try {
     const { serviceName } = req.params;
-    const status = await easypanelService.getInstanceStatus(serviceName);
+    const status = await dockerService.getInstanceStatus(serviceName);
     res.json(status);
   } catch (error: any) {
     console.error('[Suite] ❌ Error getting status:', error);
@@ -517,7 +517,7 @@ router.post('/api/suite/usage', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'name_service is required' });
     }
 
-    const metrics = await easypanelService.getInstanceMetrics(name_service);
+    const metrics = await dockerService.getInstanceMetrics(name_service);
     res.json(metrics);
   } catch (error: any) {
     console.error('[Suite] ❌ Error getting metrics:', error);
