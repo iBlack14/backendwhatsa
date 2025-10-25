@@ -122,6 +122,57 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
 
   // Guardar credenciales
   sock.ev.on('creds.update', saveCreds);
+
+  // ✅✅ WEBHOOK: Notificar al frontend cuando se envían/reciben mensajes
+  sock.ev.on('messages.upsert', async ({ messages, type }) => {
+    console.log(`[${clientId}] 📨 messages.upsert event - ${messages.length} message(s)`);
+    
+    for (const msg of messages) {
+      try {
+        const fromMe = msg.key.fromMe;
+        const remoteJid = msg.key.remoteJid;
+        const messageId = msg.key.id;
+        
+        console.log(`[${clientId}] ${fromMe ? '📤 Sent' : '📥 Received'} message - ${remoteJid}`);
+        
+        // Obtener URL del frontend desde variable de entorno
+        const frontendUrl = process.env.FRONTEND_URL;
+        
+        if (!frontendUrl) {
+          console.warn(`[${clientId}] ⚠️ FRONTEND_URL not configured, skipping webhook`);
+          continue;
+        }
+        
+        // Enviar webhook al frontend
+        const webhookUrl = `${frontendUrl}/api/webhooks/whatsapp`;
+        
+        await axios.post(webhookUrl, {
+          event: 'messages.upsert',
+          instanceId: clientId,
+          data: {
+            fromMe: fromMe,
+            key: {
+              remoteJid: remoteJid,
+              fromMe: fromMe,
+              id: messageId,
+            },
+            message: msg.message,
+            messageTimestamp: msg.messageTimestamp,
+          }
+        }, {
+          timeout: 5000,
+          headers: {
+            'Content-Type': 'application/json',
+          }
+        });
+        
+        console.log(`[${clientId}] ✅ Webhook sent to frontend: ${fromMe ? 'sent' : 'received'}`);
+      } catch (webhookError: any) {
+        console.error(`[${clientId}] ❌ Error sending webhook:`, webhookError.message);
+        // No bloquear el flujo si falla el webhook
+      }
+    }
+  });
 }
 
 export async function sendMessage(
