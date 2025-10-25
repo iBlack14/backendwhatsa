@@ -7,8 +7,16 @@ import {
   disconnectSession,
 } from './whatsapp';
 import { CreateSessionRequest, SendMessageRequest } from './types';
+import easypanelService from './services/easypanel.service';
+import { createClient } from '@supabase/supabase-js';
 
 const router = Router();
+
+// Supabase client
+const supabase = createClient(
+  process.env.SUPABASE_URL || '',
+  process.env.SUPABASE_SERVICE_KEY || ''
+);
 
 // Health check
 router.get('/health', (req: Request, res: Response) => {
@@ -296,6 +304,223 @@ router.post('/api/send-image/:clientId', async (req: Request, res: Response) => 
     });
   } catch (error: any) {
     console.error('Error sending image:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ========== RUTAS DE EASYPANEL / N8N ==========
+
+/**
+ * Crear nueva instancia de n8n
+ */
+router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
+  try {
+    const { service_name, user_id, memory, cpu } = req.body;
+
+    console.log('[Suite] Creating n8n instance:', { service_name, user_id });
+
+    // Validaciones
+    if (!service_name) {
+      return res.status(400).json({ error: 'service_name is required' });
+    }
+
+    if (!user_id) {
+      return res.status(400).json({ error: 'user_id is required' });
+    }
+
+    // Validar formato del nombre
+    if (!/^[a-z0-9_-]+$/.test(service_name)) {
+      return res.status(400).json({ 
+        error: 'Invalid service name. Use only lowercase letters, numbers, hyphens and underscores' 
+      });
+    }
+
+    // Validar nombre reservado
+    if (service_name === 'n8n_free_treal') {
+      return res.status(400).json({ 
+        error: 'The name "n8n_free_treal" is reserved by the system' 
+      });
+    }
+
+    // Verificar si el servicio ya existe
+    const exists = await easypanelService.serviceExists(service_name);
+    if (exists) {
+      return res.status(400).json({ 
+        error: 'A service with this name already exists' 
+      });
+    }
+
+    // Crear instancia en Easypanel
+    const result = await easypanelService.createN8nInstance({
+      serviceName: service_name,
+      userId: user_id,
+      memory: memory || '256M',
+      cpu: cpu || 256,
+    });
+
+    // Guardar en Supabase
+    const { data: suiteData, error: supabaseError } = await supabase
+      .from('suites')
+      .insert({
+        user_id: user_id,
+        name: service_name,
+        url: result.url,
+        activo: true,
+        credencials: result.credentials,
+        product_name: 'n8n',
+      })
+      .select()
+      .single();
+
+    if (supabaseError) {
+      console.error('[Suite] Error saving to Supabase:', supabaseError);
+      // Intentar eliminar la instancia de Easypanel si falló guardar en Supabase
+      try {
+        await easypanelService.deleteInstance(service_name);
+      } catch (cleanupError) {
+        console.error('[Suite] Error cleaning up Easypanel instance:', cleanupError);
+      }
+      throw supabaseError;
+    }
+
+    console.log('[Suite] ✅ n8n instance created successfully:', service_name);
+
+    res.json({
+      success: true,
+      message: 'n8n instance created successfully',
+      data: {
+        ...result,
+        documentId: suiteData.documentId,
+      },
+    });
+  } catch (error: any) {
+    console.error('[Suite] ❌ Error creating n8n instance:', error);
+    res.status(500).json({ 
+      error: error.message || 'Failed to create n8n instance' 
+    });
+  }
+});
+
+/**
+ * Iniciar instancia
+ */
+router.post('/api/suite/init', async (req: Request, res: Response) => {
+  try {
+    const { name_service } = req.body;
+
+    if (!name_service) {
+      return res.status(400).json({ error: 'name_service is required' });
+    }
+
+    console.log('[Suite] Starting instance:', name_service);
+
+    const result = await easypanelService.startInstance(name_service);
+
+    // Actualizar estado en Supabase
+    await supabase
+      .from('suites')
+      .update({ activo: true })
+      .eq('name', name_service);
+
+    console.log('[Suite] ✅ Instance started:', name_service);
+
+    res.json(result);
+  } catch (error: any) {
+    console.error('[Suite] ❌ Error starting instance:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Pausar instancia
+ */
+router.post('/api/suite/pause', async (req: Request, res: Response) => {
+  try {
+    const { name_service } = req.body;
+
+    if (!name_service) {
+      return res.status(400).json({ error: 'name_service is required' });
+    }
+
+    console.log('[Suite] Pausing instance:', name_service);
+
+    const result = await easypanelService.pauseInstance(name_service);
+
+    // Actualizar estado en Supabase
+    await supabase
+      .from('suites')
+      .update({ activo: false })
+      .eq('name', name_service);
+
+    console.log('[Suite] ✅ Instance paused:', name_service);
+
+    res.json(result);
+  } catch (error: any) {
+    console.error('[Suite] ❌ Error pausing instance:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Eliminar instancia
+ */
+router.post('/api/suite/delete', async (req: Request, res: Response) => {
+  try {
+    const { name_service } = req.body;
+
+    if (!name_service) {
+      return res.status(400).json({ error: 'name_service is required' });
+    }
+
+    console.log('[Suite] Deleting instance:', name_service);
+
+    // Eliminar de Easypanel
+    const result = await easypanelService.deleteInstance(name_service);
+
+    // Eliminar de Supabase
+    await supabase
+      .from('suites')
+      .delete()
+      .eq('name', name_service);
+
+    console.log('[Suite] ✅ Instance deleted:', name_service);
+
+    res.json(result);
+  } catch (error: any) {
+    console.error('[Suite] ❌ Error deleting instance:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Obtener estado de instancia
+ */
+router.get('/api/suite/status/:serviceName', async (req: Request, res: Response) => {
+  try {
+    const { serviceName } = req.params;
+    const status = await easypanelService.getInstanceStatus(serviceName);
+    res.json(status);
+  } catch (error: any) {
+    console.error('[Suite] ❌ Error getting status:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * Obtener métricas de uso
+ */
+router.post('/api/suite/usage', async (req: Request, res: Response) => {
+  try {
+    const { name_service } = req.body;
+
+    if (!name_service) {
+      return res.status(400).json({ error: 'name_service is required' });
+    }
+
+    const metrics = await easypanelService.getInstanceMetrics(name_service);
+    res.json(metrics);
+  } catch (error: any) {
+    console.error('[Suite] ❌ Error getting metrics:', error);
     res.status(500).json({ error: error.message });
   }
 });
