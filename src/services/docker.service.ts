@@ -1,6 +1,28 @@
 import Docker from 'dockerode';
 
-const docker = new Docker({ socketPath: '/var/run/docker.sock' });
+// Configuración para Windows (Docker Desktop)
+const getDockerConnection = () => {
+  if (process.platform === 'win32') {
+    // Windows: Intentar con named pipe primero
+    try {
+      return new Docker({ socketPath: '//./pipe/docker_engine' });
+    } catch (error) {
+      console.warn('⚠️ Named pipe failed, trying npipe...');
+      try {
+        return new Docker({ socketPath: '\\\\.\\pipe\\docker_engine' });
+      } catch (error2) {
+        console.warn('⚠️ Npipe failed, using default...');
+        return new Docker(); // Usa configuración por defecto
+      }
+    }
+  } else {
+    // Linux/Mac: usar socket Unix
+    return new Docker({ socketPath: '/var/run/docker.sock' });
+  }
+};
+
+const docker = getDockerConnection();
+console.log('✅ Docker connection initialized for', process.platform);
 
 const BASE_DOMAIN = process.env.BASE_DOMAIN || '1mrj9n.easypanel.host';
 const NETWORK_NAME = process.env.DOCKER_NETWORK || 'easypanel';
@@ -14,16 +36,23 @@ interface CreateN8nInstanceParams {
 
 export class DockerService {
   /**
+   * Verificar si Docker está disponible
+   */
+  private checkDockerAvailable(): void {
+    if (!docker) {
+      throw new Error('Docker is not available. Please start Docker Desktop.');
+    }
+  }
+
+  /**
    * Crear una nueva instancia de n8n usando Docker
    */
   async createN8nInstance(params: CreateN8nInstanceParams) {
+    this.checkDockerAvailable();
     const { serviceName, userId, memory = '256m', cpu = 256 } = params;
 
     try {
       console.log(`[Docker] Creating n8n instance: ${serviceName}`);
-
-      const password = this.generatePassword();
-      const username = `user_${userId.substring(0, 8)}`;
 
       // Configuración del contenedor
       const containerConfig: Docker.ContainerCreateOptions = {
@@ -31,21 +60,25 @@ export class DockerService {
         Image: 'n8nio/n8n:latest',
         Env: [
           `N8N_ENCRYPTION_KEY=${process.env.N8N_ENCRYPTION_KEY || this.generatePassword()}`,
+          // Permitir que el usuario configure su propia cuenta en el setup inicial
           'N8N_USER_MANAGEMENT_DISABLED=false',
-          'N8N_BASIC_AUTH_ACTIVE=true',
-          `N8N_BASIC_AUTH_USER=${username}`,
-          `N8N_BASIC_AUTH_PASSWORD=${password}`,
+          // No usar autenticación básica - dejar que N8N maneje el setup
+          'N8N_BASIC_AUTH_ACTIVE=false',
           `WEBHOOK_URL=https://${serviceName}.${BASE_DOMAIN}`,
         ],
         Labels: {
-          'traefik.enable': 'true',
-          [`traefik.http.routers.${serviceName}.rule`]: `Host(\`${serviceName}.${BASE_DOMAIN}\`)`,
-          [`traefik.http.routers.${serviceName}.entrypoints`]: 'websecure',
-          [`traefik.http.routers.${serviceName}.tls.certresolver`]: 'letsencrypt',
-          [`traefik.http.services.${serviceName}.loadbalancer.server.port`]: '5678',
-          'easypanel.managed': 'true',
-          'easypanel.project': 'blxk',
-          'easypanel.service': serviceName,
+          // Labels de Traefik solo en producción
+          ...(process.env.NODE_ENV === 'production' ? {
+            'traefik.enable': 'true',
+            [`traefik.http.routers.${serviceName}.rule`]: `Host(\`${serviceName}.${BASE_DOMAIN}\`)`,
+            [`traefik.http.routers.${serviceName}.entrypoints`]: 'websecure',
+            [`traefik.http.routers.${serviceName}.tls.certresolver`]: 'letsencrypt',
+            [`traefik.http.services.${serviceName}.loadbalancer.server.port`]: '5678',
+            'easypanel.managed': 'true',
+            'easypanel.project': 'blxk',
+          } : {}),
+          'service': serviceName,
+          'managed_by': 'suite',
         },
         HostConfig: {
           Memory: this.parseMemory(memory),
@@ -56,7 +89,12 @@ export class DockerService {
           Binds: [
             `${serviceName}-data:/home/node/.n8n`,
           ],
-          NetworkMode: NETWORK_NAME,
+          // Solo usar NetworkMode si la red existe (producción)
+          // En desarrollo local, usar red por defecto
+          ...(process.env.NODE_ENV === 'production' ? { NetworkMode: NETWORK_NAME } : {}),
+          PortBindings: {
+            '5678/tcp': [{ HostPort: '0' }] // Puerto aleatorio en desarrollo
+          }
         },
         ExposedPorts: {
           '5678/tcp': {},
@@ -72,17 +110,29 @@ export class DockerService {
       // Iniciar contenedor
       await container.start();
 
+      // Obtener información del contenedor para el puerto
+      const containerInfo = await container.inspect();
+      const port = containerInfo.NetworkSettings.Ports?.['5678/tcp']?.[0]?.HostPort || '5678';
+
       console.log(`[Docker] ✅ Instance created and started: ${serviceName}`);
+      console.log(`[Docker] 📍 Port: ${port}`);
+
+      // En desarrollo, usar localhost con puerto
+      const isDev = process.env.NODE_ENV !== 'production';
+      const publicUrl = isDev 
+        ? `http://localhost:${port}` 
+        : `https://${serviceName}.${BASE_DOMAIN}`;
 
       return {
         success: true,
         containerId: container.id,
-        url: `https://${serviceName}.${BASE_DOMAIN}`,
-        urlInterna: `http://${serviceName}:5678`,
+        url: publicUrl,
+        urlInterna: `http://localhost:${port}`,
+        port: port,
         credentials: {
-          username: username,
-          password: password,
-          url: `https://${serviceName}.${BASE_DOMAIN}`,
+          url: publicUrl,
+          setup_required: true,
+          note: 'Accede a la URL para completar el setup inicial de N8N y crear tu cuenta',
         },
       };
     } catch (error: any) {

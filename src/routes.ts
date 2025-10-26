@@ -9,6 +9,7 @@ import {
 import { CreateSessionRequest, SendMessageRequest } from './types';
 import dockerService from './services/docker.service';
 import { createClient } from '@supabase/supabase-js';
+import plansRouter from './routes/plans.routes';
 
 const router = Router();
 
@@ -342,11 +343,39 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
       });
     }
 
-    // Verificar si el contenedor ya existe
+    // Verificar si ya existe en Supabase
+    const { data: existingInDb } = await supabase
+      .from('suites')
+      .select('id, name')
+      .eq('user_id', user_id)
+      .eq('name', service_name)
+      .single();
+
+    if (existingInDb) {
+      // Verificar si el contenedor Docker realmente existe
+      const containerExists = await dockerService.containerExists(service_name);
+      
+      if (!containerExists) {
+        // Registro huérfano - eliminar de Supabase
+        console.log(`[Suite] Cleaning orphaned record: ${service_name}`);
+        await supabase
+          .from('suites')
+          .delete()
+          .eq('id', existingInDb.id);
+        
+        console.log(`[Suite] Orphaned record deleted, proceeding with creation`);
+      } else {
+        return res.status(400).json({ 
+          error: `Ya existe una instancia con el nombre "${service_name}". Por favor usa otro nombre o elimina la instancia anterior.` 
+        });
+      }
+    }
+
+    // Verificar si el contenedor ya existe en Docker
     const exists = await dockerService.containerExists(service_name);
     if (exists) {
       return res.status(400).json({ 
-        error: 'A service with this name already exists' 
+        error: 'A Docker container with this name already exists' 
       });
     }
 
@@ -366,8 +395,12 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
         name: service_name,
         url: result.url,
         activo: true,
-        credencials: result.credentials,
-        product_name: 'n8n',
+        credencials: {
+          ...result.credentials,
+          product: 'n8n',
+          port: result.port,
+          container_id: result.containerId,
+        },
       })
       .select()
       .single();
@@ -524,5 +557,8 @@ router.post('/api/suite/usage', async (req: Request, res: Response) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+// Montar rutas de planes y suscripciones
+router.use('/api', plansRouter);
 
 export default router;

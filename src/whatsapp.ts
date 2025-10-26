@@ -72,11 +72,16 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
       );
 
       if (shouldReconnect) {
+        // Marcar sesión como desconectada antes de eliminar
+        session.state = 'Disconnected';
         // Eliminar sesión existente antes de reconectar
         sessions.delete(clientId);
         console.log(`🔄 Reconnecting session ${clientId}...`);
+        // Pequeño delay para evitar race conditions
+        await new Promise(resolve => setTimeout(resolve, 1000));
         await createWhatsAppSession(clientId);
       } else {
+        session.state = 'Disconnected';
         sessions.delete(clientId);
         await updateInstanceInN8N(clientId, {
           state: 'Disconnected',
@@ -182,15 +187,29 @@ export async function sendMessage(
 ): Promise<void> {
   const session = sessions.get(clientId);
 
-  if (!session || session.state !== 'Connected') {
-    throw new Error('Session not connected');
+  if (!session) {
+    throw new Error(`Session not found for clientId: ${clientId}`);
+  }
+
+  if (session.state !== 'Connected') {
+    throw new Error(`Session not connected. Current state: ${session.state}`);
+  }
+
+  if (!session.sock || typeof session.sock.sendMessage !== 'function') {
+    throw new Error('WhatsApp socket is not properly initialized. Please reconnect the session.');
   }
 
   const jid = to.includes('@s.whatsapp.net') ? to : `${to}@s.whatsapp.net`;
   
   console.log(`📤 Sending message to ${to} from ${clientId}`);
-  await session.sock.sendMessage(jid, { text: message });
-  console.log(`✅ Message sent successfully`);
+  
+  try {
+    await session.sock.sendMessage(jid, { text: message });
+    console.log(`✅ Message sent successfully`);
+  } catch (error: any) {
+    console.error(`❌ Error sending message:`, error);
+    throw new Error(`Failed to send message: ${error.message}`);
+  }
 }
 
 export function getSession(clientId: string): WhatsAppSession | undefined {
