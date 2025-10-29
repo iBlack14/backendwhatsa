@@ -33,7 +33,8 @@ desktop.ini
 
 # WhatsApp session data
 auth_info_baileys/
-sessions/
+sessions/*
+!sessions/.gitkeep
 *.session.json
 
 # Docker volumes data (if running locally)

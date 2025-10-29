@@ -21,6 +21,14 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
   console.log(`🔄 Creating session for ${clientId}...`);
 
   const sessionPath = path.join(__dirname, '../sessions', clientId);
+  
+  // Asegurar que el directorio de sesiones existe
+  const sessionsDir = path.join(__dirname, '../sessions');
+  if (!fs.existsSync(sessionsDir)) {
+    console.log('📁 Creating sessions directory...');
+    fs.mkdirSync(sessionsDir, { recursive: true });
+  }
+  
   const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
 
   const sock = makeWASocket({
