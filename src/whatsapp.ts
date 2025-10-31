@@ -69,15 +69,18 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
       }
       
       // Convertir QR a base64 para el frontend
+      console.log(`🔄 Converting QR to base64...`);
       const qrBase64 = await QRCode.toDataURL(qr);
       session.qr = qrBase64;
       session.state = 'Initializing';
       
+      console.log(`💾 Saving QR to database (length: ${qrBase64.length} chars)...`);
       await updateInstanceInN8N(clientId, {
         state: 'Initializing',
         qr: qrBase64,
-        qr_loading: true,
+        qr_loading: false, // Cambiar a false porque el QR ya está listo
       });
+      console.log(`✅ QR saved! Frontend should receive it within 1-2 seconds.`);
     }
 
     if (connection === 'close') {
