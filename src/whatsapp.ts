@@ -251,9 +251,13 @@ export async function disconnectSession(clientId: string): Promise<void> {
 }
 
 async function updateInstanceInN8N(clientId: string, data: any): Promise<void> {
+  console.log(`\n🔄 Updating instance ${clientId} with data:`, JSON.stringify(data, null, 2));
+  
   try {
     // Primero intentar actualizar via N8N (si está configurado)
     const webhookUrl = process.env.N8N_UPDATE_WEBHOOK;
+    console.log(`📌 N8N webhook URL: ${webhookUrl ? 'Configured ✅' : 'Not configured ❌'}`);
+    
     if (webhookUrl) {
       try {
         await axios.put(webhookUrl, {
@@ -269,10 +273,16 @@ async function updateInstanceInN8N(clientId: string, data: any): Promise<void> {
     // También actualizar directamente en Supabase como respaldo
     const supabaseUrl = process.env.SUPABASE_URL;
     const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+    
+    console.log(`📌 Supabase URL: ${supabaseUrl ? 'Configured ✅' : 'Not configured ❌'}`);
+    console.log(`📌 Supabase Key: ${supabaseKey ? 'Configured ✅' : 'Not configured ❌'}`);
 
     if (supabaseUrl && supabaseKey) {
-      await axios.patch(
-        `${supabaseUrl}/rest/v1/instances?document_id=eq.${clientId}`,
+      const updateUrl = `${supabaseUrl}/rest/v1/instances?document_id=eq.${clientId}`;
+      console.log(`🌐 Updating Supabase at: ${updateUrl}`);
+      
+      const response = await axios.patch(
+        updateUrl,
         data,
         {
           headers: {
@@ -283,12 +293,17 @@ async function updateInstanceInN8N(clientId: string, data: any): Promise<void> {
           },
         }
       );
-      console.log(`✅ Updated instance ${clientId} in Supabase`);
+      console.log(`✅ Updated instance ${clientId} in Supabase - Status: ${response.status}`);
     } else {
-      console.warn('⚠️ Supabase credentials not configured');
+      console.error('❌ Supabase credentials not configured - QR will NOT be saved to database!');
+      console.error('❌ Set SUPABASE_URL and SUPABASE_SERVICE_KEY environment variables');
     }
   } catch (error: any) {
     console.error('❌ Error updating instance:', error.message);
+    if (error.response) {
+      console.error('❌ Response status:', error.response.status);
+      console.error('❌ Response data:', error.response.data);
+    }
   }
 }
 
