@@ -2,6 +2,7 @@ import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
   WASocket,
+  WAMessage,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import axios from 'axios';
@@ -9,6 +10,8 @@ import path from 'path';
 import fs from 'fs';
 import QRCode from 'qrcode';
 import { WhatsAppSession } from './types';
+import { proxyService } from './services/proxy.service';
+import { messageService } from './services/message.service';
 
 const sessions = new Map<string, WhatsAppSession>();
 
@@ -31,6 +34,17 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
   
   const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
 
+  // Obtener proxy si está configurado
+  const proxy = await proxyService.getProxyForInstance(clientId);
+  let agent = undefined;
+  
+  if (proxy) {
+    console.log(`🌐 Using proxy: ${proxy.name} (${proxy.type}://${proxy.host}:${proxy.port})`);
+    agent = proxyService.createProxyAgent(proxy);
+  } else {
+    console.log(`📡 No proxy configured for instance ${clientId}`);
+  }
+
   const sock = makeWASocket({
     auth: state,
     browser: ['Chrome (Linux)', '', ''],
@@ -38,6 +52,8 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
     connectTimeoutMs: 60000,
     defaultQueryTimeoutMs: 60000,
     keepAliveIntervalMs: 30000,
+    // Agregar proxy si está disponible
+    agent,
   });
 
   const session: WhatsAppSession = {
@@ -161,6 +177,38 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
         const messageId = msg.key.id;
         
         console.log(`[${clientId}] ${fromMe ? '📤 Sent' : '📥 Received'} message - ${remoteJid}`);
+        
+        // 💾 Guardar mensaje en la base de datos
+        try {
+          const messageText = msg.message?.conversation || 
+                             msg.message?.extendedTextMessage?.text ||
+                             undefined;
+          const messageCaption = msg.message?.imageMessage?.caption ||
+                                msg.message?.videoMessage?.caption ||
+                                undefined;
+          const messageType = Object.keys(msg.message || {})[0] || 'text';
+          
+          // Extraer nombre del contacto
+          const senderName = msg.pushName || undefined;
+          const senderPhone = remoteJid?.split('@')[0] || undefined;
+          
+          await messageService.saveMessage({
+            instance_id: clientId,
+            chat_id: remoteJid || '',
+            message_id: messageId || '',
+            sender_name: senderName,
+            sender_phone: senderPhone,
+            message_text: messageText,
+            message_caption: messageCaption,
+            message_type: messageType,
+            from_me: fromMe || false,
+            timestamp: new Date(msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now()),
+            is_read: fromMe || false,
+            metadata: msg,
+          });
+        } catch (dbError) {
+          console.error(`[${clientId}] ❌ Error saving message to DB:`, dbError);
+        }
         
         // Obtener URL del frontend desde variable de entorno
         const frontendUrl = process.env.FRONTEND_URL;
