@@ -33,7 +33,6 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
 
   const sock = makeWASocket({
     auth: state,
-    printQRInTerminal: true, // Mostrar QR en terminal también
     browser: ['Chrome (Linux)', '', ''],
     // Configuración adicional para mejorar conexión
     connectTimeoutMs: 60000,
@@ -55,7 +54,19 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      console.log(`📱 QR Code generated for ${clientId}`);
+      console.log('\n' + '='.repeat(60));
+      console.log(`📱 QR CODE GENERATED FOR: ${clientId}`);
+      console.log('='.repeat(60));
+      console.log('👉 Scan this QR code with WhatsApp to connect');
+      console.log('='.repeat(60) + '\n');
+      
+      // Imprimir QR en la terminal para debugging
+      try {
+        const qrTerminal = require('qrcode-terminal');
+        qrTerminal.generate(qr, { small: true });
+      } catch (e) {
+        console.log('⚠️ qrcode-terminal not installed, skipping terminal QR');
+      }
       
       // Convertir QR a base64 para el frontend
       const qrBase64 = await QRCode.toDataURL(qr);
