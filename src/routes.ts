@@ -10,6 +10,8 @@ import { CreateSessionRequest, SendMessageRequest } from './types';
 import dockerService from './services/docker.service';
 import { createClient } from '@supabase/supabase-js';
 import plansRouter from './routes/plans.routes';
+import proxiesRouter from './routes/proxies.routes';
+import messagesRouter from './routes/messages.routes';
 
 const router = Router();
 
@@ -560,5 +562,11 @@ router.post('/api/suite/usage', async (req: Request, res: Response) => {
 
 // Montar rutas de planes y suscripciones
 router.use('/api', plansRouter);
+
+// Montar rutas de proxies
+router.use('/api/proxies', proxiesRouter);
+
+// Montar rutas de mensajes y chats
+router.use('/api/messages', messagesRouter);
 
 export default router;
