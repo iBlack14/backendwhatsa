@@ -197,7 +197,7 @@ router.post('/subscription/create-instance', async (req: Request, res: Response)
     const { createClient } = await import('@supabase/supabase-js');
     const supabase = createClient(
       process.env.SUPABASE_URL || '',
-      process.env.SUPABASE_SERVICE_KEY || ''
+      process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY || ''
     );
 
     await supabase.from('suites').insert({

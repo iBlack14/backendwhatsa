@@ -14,10 +14,11 @@ export class SubscriptionService {
 
   constructor() {
     const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
+    // Aceptar ambos nombres: SUPABASE_SERVICE_KEY o SERVICE_ROLE_KEY
+    const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
 
     if (!supabaseUrl || !supabaseKey) {
-      throw new Error('SUPABASE_URL and SUPABASE_SERVICE_KEY must be set in environment variables');
+      throw new Error('SUPABASE_URL and SUPABASE_SERVICE_KEY (or SERVICE_ROLE_KEY) must be set in environment variables');
     }
 
     this.supabase = createClient(supabaseUrl, supabaseKey);

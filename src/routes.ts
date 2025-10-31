@@ -13,10 +13,10 @@ import plansRouter from './routes/plans.routes';
 
 const router = Router();
 
-// Supabase client
+// Supabase client - aceptar ambos nombres de variable
 const supabase = createClient(
   process.env.SUPABASE_URL || '',
-  process.env.SUPABASE_SERVICE_KEY || ''
+  process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY || ''
 );
 
 // Health check
