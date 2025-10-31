@@ -257,23 +257,7 @@ async function updateInstanceInN8N(clientId: string, data: any): Promise<void> {
   console.log(`\n🔄 Updating instance ${clientId} with data:`, JSON.stringify(data, null, 2));
   
   try {
-    // Primero intentar actualizar via N8N (si está configurado)
-    const webhookUrl = process.env.N8N_UPDATE_WEBHOOK;
-    console.log(`📌 N8N webhook URL: ${webhookUrl ? 'Configured ✅' : 'Not configured ❌'}`);
-    
-    if (webhookUrl) {
-      try {
-        await axios.put(webhookUrl, {
-          documentId: clientId,
-          ...data,
-        });
-        console.log(`✅ Updated instance ${clientId} via N8N`);
-      } catch (n8nError: any) {
-        console.warn('⚠️ N8N update failed, will try Supabase directly:', n8nError.message);
-      }
-    }
-
-    // También actualizar directamente en Supabase como respaldo
+    // PRIORIDAD 1: Actualizar directamente en Supabase (más confiable)
     const supabaseUrl = process.env.SUPABASE_URL;
     // Aceptar ambos nombres: SUPABASE_SERVICE_KEY o SERVICE_ROLE_KEY
     const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
@@ -298,6 +282,20 @@ async function updateInstanceInN8N(clientId: string, data: any): Promise<void> {
         }
       );
       console.log(`✅ Updated instance ${clientId} in Supabase - Status: ${response.status}`);
+      
+      // PRIORIDAD 2: Intentar N8N como opcional (no crítico)
+      const webhookUrl = process.env.N8N_UPDATE_WEBHOOK;
+      if (webhookUrl) {
+        try {
+          await axios.put(webhookUrl, {
+            documentId: clientId,
+            ...data,
+          }, { timeout: 3000 }); // Timeout de 3s
+          console.log(`✅ Also updated via N8N`);
+        } catch (n8nError: any) {
+          console.log(`ℹ️ N8N update skipped (not critical): ${n8nError.message}`);
+        }
+      }
     } else {
       console.error('❌ Supabase credentials not configured - QR will NOT be saved to database!');
       console.error('❌ Set SUPABASE_URL and SUPABASE_SERVICE_KEY environment variables');
