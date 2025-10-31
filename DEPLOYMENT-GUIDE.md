@@ -38,15 +38,18 @@
 
 ---
 
-## 2️⃣ Configurar N8N
+## 2️⃣ Configurar N8N (OPCIONAL)
+
+> ⚠️ **NOTA**: N8N es completamente opcional. El backend actualiza Supabase directamente.
+> Solo configura N8N si necesitas procesamiento adicional o integraciones.
 
 ### Paso 1: Importar workflow
 1. En N8N → **Workflows** → **Import from File**
-2. Selecciona `n8n-workflow-update-instance.json`
+2. Selecciona `n8n-workflow-FIXED.json` (versión corregida)
 3. Click en **Import**
 
 ### Paso 2: Configurar credenciales de Supabase
-1. Click en el nodo "Supabase - Update Instance"
+1. Click en el nodo "Update Supabase"
 2. **Credentials** → **Create New**
 3. Completa:
    - **Host**: Tu `SUPABASE_URL` (sin https://)
@@ -59,6 +62,10 @@
    ```
    https://tu-n8n.com/webhook/update-instance
    ```
+
+### Si NO usas N8N:
+Simplemente **no configures** la variable `N8N_UPDATE_WEBHOOK` en el backend.
+El sistema funcionará perfectamente sin N8N.
 
 ---
 
