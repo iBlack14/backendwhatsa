@@ -206,23 +206,38 @@ export class DockerService {
       
       // Detener si está corriendo
       try {
-        await container.stop();
+        await container.stop({ t: 10 });
+        console.log(`[Docker] Container stopped: ${serviceName}`);
       } catch (e) {
-        // Ya está detenido
+        console.log(`[Docker] Container already stopped: ${serviceName}`);
+      }
+
+      // Desconectar de las redes
+      const networks = [NETWORK_NAME, 'easypanel-blxk'];
+      for (const networkName of networks) {
+        try {
+          const network = docker.getNetwork(networkName);
+          await network.disconnect({ Container: serviceName, Force: true });
+          console.log(`[Docker] Disconnected from network: ${networkName}`);
+        } catch (e) {
+          // Ya desconectado o no estaba conectado
+        }
       }
 
       // Eliminar contenedor
-      await container.remove();
+      await container.remove({ force: true });
+      console.log(`[Docker] Container removed: ${serviceName}`);
 
       // Eliminar volumen
       try {
         const volume = docker.getVolume(`${serviceName}-data`);
-        await volume.remove();
+        await volume.remove({ force: true });
+        console.log(`[Docker] Volume removed: ${serviceName}-data`);
       } catch (e) {
-        console.log('[Docker] Volume already removed or not found');
+        console.log(`[Docker] Volume not found or already removed: ${serviceName}-data`);
       }
 
-      console.log(`[Docker] ✅ Instance deleted: ${serviceName}`);
+      console.log(`[Docker] ✅ Instance deleted completely: ${serviceName}`);
       return { success: true, message: 'Instance deleted successfully' };
     } catch (error: any) {
       console.error('[Docker] ❌ Error deleting instance:', error.message);
