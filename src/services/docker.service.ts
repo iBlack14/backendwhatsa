@@ -70,7 +70,7 @@ export class DockerService {
           // Labels de Traefik para que el proxy inverso encuentre el contenedor
           'traefik.enable': 'true',
           [`traefik.http.routers.${serviceName}.rule`]: `Host(\`${serviceName}.${BASE_DOMAIN}\`)`,
-          [`traefik.http.routers.${serviceName}.entrypoints`]: 'websecure',
+          [`traefik.http.routers.${serviceName}.entrypoints`]: 'https',
           [`traefik.http.routers.${serviceName}.tls`]: 'true',
           [`traefik.http.routers.${serviceName}.tls.certresolver`]: 'letsencrypt',
           [`traefik.http.services.${serviceName}.loadbalancer.server.port`]: '5678',
