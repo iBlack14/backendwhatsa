@@ -67,16 +67,14 @@ export class DockerService {
           `WEBHOOK_URL=https://${serviceName}.${BASE_DOMAIN}`,
         ],
         Labels: {
-          // Labels de Traefik solo en producción
-          ...(process.env.NODE_ENV === 'production' ? {
-            'traefik.enable': 'true',
-            [`traefik.http.routers.${serviceName}.rule`]: `Host(\`${serviceName}.${BASE_DOMAIN}\`)`,
-            [`traefik.http.routers.${serviceName}.entrypoints`]: 'websecure',
-            [`traefik.http.routers.${serviceName}.tls.certresolver`]: 'letsencrypt',
-            [`traefik.http.services.${serviceName}.loadbalancer.server.port`]: '5678',
-            'easypanel.managed': 'true',
-            'easypanel.project': 'blxk',
-          } : {}),
+          // Labels de Traefik para que el proxy inverso encuentre el contenedor
+          'traefik.enable': 'true',
+          [`traefik.http.routers.${serviceName}.rule`]: `Host(\`${serviceName}.${BASE_DOMAIN}\`)`,
+          [`traefik.http.routers.${serviceName}.entrypoints`]: 'websecure',
+          [`traefik.http.routers.${serviceName}.tls.certresolver`]: 'letsencrypt',
+          [`traefik.http.services.${serviceName}.loadbalancer.server.port`]: '5678',
+          'easypanel.managed': 'true',
+          'easypanel.project': 'blxk',
           'service': serviceName,
           'managed_by': 'suite',
         },
@@ -89,9 +87,8 @@ export class DockerService {
           Binds: [
             `${serviceName}-data:/home/node/.n8n`,
           ],
-          // Solo usar NetworkMode si la red existe (producción)
-          // En desarrollo local, usar red por defecto
-          ...(process.env.NODE_ENV === 'production' ? { NetworkMode: NETWORK_NAME } : {}),
+          // Siempre usar la red de Easypanel en producción
+          NetworkMode: NETWORK_NAME,
           PortBindings: {
             '5678/tcp': [{ HostPort: '0' }] // Puerto aleatorio en desarrollo
           }
