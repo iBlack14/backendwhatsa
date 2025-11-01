@@ -1,9 +1,9 @@
 import axios from 'axios';
 
 const EASYPANEL_API_URL = process.env.EASYPANEL_API_URL || 'https://api.easypanel.io';
-const EASYPANEL_API_TOKEN = process.env.EASYPANEL_API_TOKEN;
-const PROJECT_NAME = process.env.EASYPANEL_PROJECT_NAME;
-const BASE_DOMAIN = process.env.BASE_DOMAIN || 'tu-dominio.com';
+const EASYPANEL_API_TOKEN = process.env.EASYPANEL_API_KEY || process.env.EASYPANEL_API_TOKEN;
+const PROJECT_NAME = process.env.EASYPANEL_PROJECT_ID || process.env.EASYPANEL_PROJECT_NAME || 'blxk';
+const BASE_DOMAIN = process.env.EASYPANEL_BASE_DOMAIN || process.env.BASE_DOMAIN || 'qn0goj.easypanel.host';
 
 interface CreateN8nInstanceParams {
   serviceName: string;
