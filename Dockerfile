@@ -3,7 +3,7 @@ FROM node:20-alpine
 WORKDIR /app
 
 # Instalar dependencias de sistema necesarias
-RUN apk add --no-cache python3 make g++
+RUN apk add --no-cache python3 make g++ docker-cli
 
 # Copiar package files
 COPY package*.json ./
