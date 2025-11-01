@@ -107,12 +107,28 @@ export class DockerService {
       // Iniciar contenedor
       await container.start();
 
+      // Verificar y conectar a la red easypanel si no está conectado
+      try {
+        const network = docker.getNetwork(NETWORK_NAME);
+        await network.connect({
+          Container: container.id,
+        });
+        console.log(`[Docker] ✅ Connected to network: ${NETWORK_NAME}`);
+      } catch (netError: any) {
+        if (netError.statusCode === 403) {
+          console.log(`[Docker] ℹ️ Already connected to network: ${NETWORK_NAME}`);
+        } else {
+          console.warn(`[Docker] ⚠️ Could not connect to network ${NETWORK_NAME}:`, netError.message);
+        }
+      }
+
       // Obtener información del contenedor para el puerto
       const containerInfo = await container.inspect();
       const port = containerInfo.NetworkSettings.Ports?.['5678/tcp']?.[0]?.HostPort || '5678';
 
       console.log(`[Docker] ✅ Instance created and started: ${serviceName}`);
       console.log(`[Docker] 📍 Port: ${port}`);
+      console.log(`[Docker] 🌐 URL: https://${serviceName}.${BASE_DOMAIN}`);
 
       // En desarrollo, usar localhost con puerto
       const isDev = process.env.NODE_ENV !== 'production';
