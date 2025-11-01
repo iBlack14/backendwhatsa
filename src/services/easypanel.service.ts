@@ -110,6 +110,9 @@ export class EasypanelService {
         ],
       };
 
+      // Nota: La API de Easypanel requiere autenticación y formato específico
+      // Por ahora, este servicio no está completamente implementado
+      // Se recomienda usar Docker directo con el socket montado
       const response = await axios.post(
         `${EASYPANEL_API_URL}/projects/${PROJECT_NAME}/services`,
         serviceData,
