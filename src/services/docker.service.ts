@@ -107,18 +107,21 @@ export class DockerService {
       // Iniciar contenedor
       await container.start();
 
-      // Verificar y conectar a la red easypanel si no está conectado
-      try {
-        const network = docker.getNetwork(NETWORK_NAME);
-        await network.connect({
-          Container: container.id,
-        });
-        console.log(`[Docker] ✅ Connected to network: ${NETWORK_NAME}`);
-      } catch (netError: any) {
-        if (netError.statusCode === 403) {
-          console.log(`[Docker] ℹ️ Already connected to network: ${NETWORK_NAME}`);
-        } else {
-          console.warn(`[Docker] ⚠️ Could not connect to network ${NETWORK_NAME}:`, netError.message);
+      // Conectar a las redes necesarias para Traefik
+      const networks = [NETWORK_NAME, 'easypanel-blxk'];
+      for (const networkName of networks) {
+        try {
+          const network = docker.getNetwork(networkName);
+          await network.connect({
+            Container: container.id,
+          });
+          console.log(`[Docker] ✅ Connected to network: ${networkName}`);
+        } catch (netError: any) {
+          if (netError.statusCode === 409 || netError.statusCode === 403) {
+            console.log(`[Docker] ℹ️ Already connected to network: ${networkName}`);
+          } else {
+            console.warn(`[Docker] ⚠️ Could not connect to network ${networkName}:`, netError.message);
+          }
         }
       }
 
