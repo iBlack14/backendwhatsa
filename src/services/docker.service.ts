@@ -24,7 +24,7 @@ const getDockerConnection = () => {
 const docker = getDockerConnection();
 console.log('✅ Docker connection initialized for', process.platform);
 
-const BASE_DOMAIN = process.env.BASE_DOMAIN || '1mrj9n.easypanel.host';
+const BASE_DOMAIN = process.env.EASYPANEL_BASE_DOMAIN || process.env.BASE_DOMAIN || 'qn0goj.easypanel.host';
 const NETWORK_NAME = process.env.DOCKER_NETWORK || 'easypanel';
 
 interface CreateN8nInstanceParams {
