@@ -12,8 +12,42 @@ import QRCode from 'qrcode';
 import { WhatsAppSession } from './types';
 import { proxyService } from './services/proxy.service';
 import { messageService } from './services/message.service';
+import { createClient } from '@supabase/supabase-js';
 
 const sessions = new Map<string, WhatsAppSession>();
+
+/**
+ * Helper para obtener el webhook_url de una instancia desde Supabase
+ * @param instanceId - ID de la instancia
+ * @returns webhook_url o null si no existe
+ */
+async function getInstanceWebhookUrl(instanceId: string): Promise<string | null> {
+  try {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+      return null;
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    
+    const { data, error } = await supabase
+      .from('instances')
+      .select('webhook_url')
+      .eq('document_id', instanceId)
+      .single();
+
+    if (error || !data) {
+      return null;
+    }
+
+    return data.webhook_url || null;
+  } catch (error) {
+    console.error(`[${instanceId}] ❌ Error fetching webhook_url:`, error);
+    return null;
+  }
+}
 
 export async function createWhatsAppSession(clientId: string): Promise<void> {
   if (sessions.has(clientId)) {
@@ -210,17 +244,32 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
           console.error(`[${clientId}] ❌ Error saving message to DB:`, dbError);
         }
         
-        // Obtener URL del frontend desde variable de entorno
-        const frontendUrl = process.env.FRONTEND_URL;
+        // 🔀 LÓGICA DE WEBHOOK: Priorizar webhook_url personalizado (N8N) o usar FRONTEND_URL (Templates)
+        let webhookUrl: string | null = null;
+        let webhookMode = 'unknown';
         
-        if (!frontendUrl) {
-          console.warn(`[${clientId}] ⚠️ FRONTEND_URL not configured, skipping webhook`);
-          continue;
+        // 1️⃣ Intentar obtener webhook_url personalizado de la instancia (modo N8N)
+        const customWebhook = await getInstanceWebhookUrl(clientId);
+        
+        if (customWebhook) {
+          webhookUrl = customWebhook;
+          webhookMode = 'N8N (custom)';
+          console.log(`[${clientId}] 🎯 Using custom webhook (N8N): ${webhookUrl}`);
+        } else {
+          // 2️⃣ Fallback: usar FRONTEND_URL (modo Templates)
+          const frontendUrl = process.env.FRONTEND_URL;
+          
+          if (frontendUrl) {
+            webhookUrl = `${frontendUrl}/api/webhooks/whatsapp`;
+            webhookMode = 'Templates (internal)';
+            console.log(`[${clientId}] 🏠 Using internal webhook (Templates): ${webhookUrl}`);
+          } else {
+            console.warn(`[${clientId}] ⚠️ No webhook configured (neither custom nor FRONTEND_URL), skipping`);
+            continue;
+          }
         }
         
-        // Enviar webhook al frontend
-        const webhookUrl = `${frontendUrl}/api/webhooks/whatsapp`;
-        
+        // Enviar webhook
         await axios.post(webhookUrl, {
           event: 'messages.upsert',
           instanceId: clientId,
@@ -241,7 +290,7 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
           }
         });
         
-        console.log(`[${clientId}] ✅ Webhook sent to frontend: ${fromMe ? 'sent' : 'received'}`);
+        console.log(`[${clientId}] ✅ Webhook sent (${webhookMode}): ${fromMe ? 'sent' : 'received'}`);
       } catch (webhookError: any) {
         console.error(`[${clientId}] ❌ Error sending webhook:`, webhookError.message);
         // No bloquear el flujo si falla el webhook
