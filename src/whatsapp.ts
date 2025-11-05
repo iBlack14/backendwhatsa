@@ -17,6 +17,40 @@ import { createClient } from '@supabase/supabase-js';
 const sessions = new Map<string, WhatsAppSession>();
 
 /**
+ * Detectar el tipo de mensaje de forma precisa
+ * @param message - Objeto de mensaje de Baileys
+ * @returns Tipo de mensaje legible
+ */
+function detectMessageType(message: any): string {
+  if (!message) return 'text';
+  
+  // Detectar tipos específicos de Baileys
+  if (message.conversation) return 'text';
+  if (message.extendedTextMessage) return 'text';
+  if (message.imageMessage) return 'image';
+  if (message.videoMessage) return 'video';
+  if (message.audioMessage) {
+    // Diferenciar entre audio y nota de voz
+    return message.audioMessage.ptt ? 'voice' : 'audio';
+  }
+  if (message.documentMessage) return 'document';
+  if (message.stickerMessage) return 'sticker';
+  if (message.locationMessage) return 'location';
+  if (message.liveLocationMessage) return 'location';
+  if (message.contactMessage) return 'contact';
+  if (message.contactsArrayMessage) return 'contact';
+  if (message.templateButtonReplyMessage) return 'button_reply';
+  if (message.listResponseMessage) return 'list_reply';
+  if (message.reactionMessage) return 'reaction';
+  if (message.pollCreationMessage) return 'poll';
+  if (message.pollUpdateMessage) return 'poll_update';
+  
+  // Si no se detecta, retornar el primer key como fallback
+  const keys = Object.keys(message);
+  return keys.length > 0 ? keys[0].replace('Message', '') : 'unknown';
+}
+
+/**
  * Helper para obtener el webhook_url de una instancia desde Supabase
  * @param instanceId - ID de la instancia
  * @returns webhook_url o null si no existe
@@ -219,8 +253,11 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
                              undefined;
           const messageCaption = msg.message?.imageMessage?.caption ||
                                 msg.message?.videoMessage?.caption ||
+                                msg.message?.documentMessage?.caption ||
                                 undefined;
-          const messageType = Object.keys(msg.message || {})[0] || 'text';
+          const messageType = detectMessageType(msg.message);
+          
+          console.log(`[${clientId}] 📋 Message type detected: ${messageType}`);
           
           // Extraer nombre del contacto
           const senderName = msg.pushName || undefined;
