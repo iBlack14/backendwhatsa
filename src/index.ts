@@ -3,6 +3,8 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import routes from './routes';
 import { restoreAllSessions } from './whatsapp';
+import { generalLimiter } from './middleware/rate-limit.middleware';
+import logger, { loggers } from './utils/logger';
 
 dotenv.config();
 
@@ -19,18 +21,21 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Logging middleware
+// Rate limiting general
+app.use('/api/', generalLimiter);
+
+// Logging middleware con Pino
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
+  loggers.apiRequest(req.method, req.path, req.ip);
   next();
 });
 
 // Routes
 app.use(routes);
 
-// Error handler
+// Error handler con logger
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error('❌ Error:', err);
+  loggers.apiError(req.method, req.path, err, 500);
   res.status(500).json({
     error: 'Internal Server Error',
     message: err.message,
@@ -40,49 +45,43 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 // Start server
 app.listen(PORT, '0.0.0.0', async () => {
   const host = process.env.HOST || 'localhost';
-  console.log('');
-  console.log('🚀 ========================================');
-  console.log(`📱 WhatsApp Backend Server`);
-  console.log(`🌐 Running on: http://0.0.0.0:${PORT}`);
-  console.log(`🌐 Local: http://localhost:${PORT}`);
-  console.log(`🌐 Network: http://${host}:${PORT}`);
-  console.log(`✅ Health check: http://${host}:${PORT}/health`);
-  console.log('🚀 ========================================');
-  console.log('');
-  console.log('📋 Available endpoints:');
-  console.log(`   POST   /api/create-session`);
-  console.log(`   POST   /api/generate-qr`);
-  console.log(`   GET    /api/qr/:clientId`);
-  console.log(`   GET    /api/profile/:documentId`);
-  console.log(`   GET    /api/sessions`);
-  console.log(`   POST   /api/send-message`);
-  console.log(`   POST   /api/send-message/:clientId (N8N format)`);
-  console.log(`   POST   /api/send-image/:clientId (N8N format)`);
-  console.log(`   POST   /api/disconnect/:clientId`);
-  console.log(`   POST   /api/disconnect-session/:documentId`);
-  console.log(`   POST   /api/update-webhook/:clientId`);
-  console.log('');
+  
+  logger.info('🚀 WhatsApp Backend Server started');
+  logger.info(`🌐 Running on: http://0.0.0.0:${PORT}`);
+  logger.info(`🌐 Local: http://localhost:${PORT}`);
+  logger.info(`🌐 Network: http://${host}:${PORT}`);
+  logger.info(`✅ Health check: http://${host}:${PORT}/health`);
+  
+  logger.info('📋 Available endpoints:');
+  logger.info('   POST   /api/create-session');
+  logger.info('   POST   /api/generate-qr');
+  logger.info('   GET    /api/qr/:clientId');
+  logger.info('   GET    /api/profile/:documentId');
+  logger.info('   GET    /api/sessions');
+  logger.info('   POST   /api/send-message');
+  logger.info('   POST   /api/send-message/:clientId (N8N format)');
+  logger.info('   POST   /api/send-image/:clientId (N8N format)');
+  logger.info('   POST   /api/disconnect/:clientId');
+  logger.info('   POST   /api/disconnect-session/:documentId');
+  logger.info('   POST   /api/update-webhook/:clientId');
   
   // Restaurar sesiones existentes
-  console.log('');
-  console.log('🔄 ========================================');
-  console.log('📱 Restoring WhatsApp Sessions...');
-  console.log('🔄 ========================================');
+  logger.info('🔄 Restoring WhatsApp Sessions...');
   try {
     await restoreAllSessions();
+    logger.info('✅ Sessions restored successfully');
   } catch (error: any) {
-    console.error('❌ Error restoring sessions:', error.message);
+    logger.error({ error: error.message }, '❌ Error restoring sessions');
   }
-  console.log('');
 });
 
 // Graceful shutdown
 process.on('SIGINT', () => {
-  console.log('\n🛑 Shutting down gracefully...');
+  logger.info('🛑 Shutting down gracefully...');
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-  console.log('\n🛑 Shutting down gracefully...');
+  logger.info('🛑 Shutting down gracefully...');
   process.exit(0);
 });
