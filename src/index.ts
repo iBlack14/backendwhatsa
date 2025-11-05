@@ -11,7 +11,7 @@ const PORT = Number(process.env.PORT) || 4000;
 
 // Middlewares
 app.use(cors({
-  origin: '*', // En producción, especifica los dominios permitidos
+  origin: process.env.FRONTEND_URL || process.env.ALLOWED_ORIGINS?.split(',') || 'http://localhost:3000',
   methods: ['GET', 'POST', 'PUT', 'DELETE'],
   credentials: true,
 }));
@@ -39,13 +39,14 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 // Start server
 app.listen(PORT, '0.0.0.0', async () => {
+  const host = process.env.HOST || 'localhost';
   console.log('');
   console.log('🚀 ========================================');
   console.log(`📱 WhatsApp Backend Server`);
   console.log(`🌐 Running on: http://0.0.0.0:${PORT}`);
   console.log(`🌐 Local: http://localhost:${PORT}`);
-  console.log(`🌐 Network: http://10.213.103.84:${PORT}`);
-  console.log(`✅ Health check: http://10.213.103.84:${PORT}/health`);
+  console.log(`🌐 Network: http://${host}:${PORT}`);
+  console.log(`✅ Health check: http://${host}:${PORT}/health`);
   console.log('🚀 ========================================');
   console.log('');
   console.log('📋 Available endpoints:');

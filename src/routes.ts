@@ -13,6 +13,7 @@ import { createClient } from '@supabase/supabase-js';
 import plansRouter from './routes/plans.routes';
 import proxiesRouter from './routes/proxies.routes';
 import messagesRouter from './routes/messages.routes';
+import { validateApiKey } from './middleware/auth.middleware';
 
 const router = Router();
 
@@ -230,16 +231,10 @@ router.post('/api/update-webhook/:clientId', (req: Request, res: Response) => {
 });
 
 // Enviar mensaje (formato N8N con API Key)
-router.post('/api/send-message/:clientId', async (req: Request, res: Response) => {
+router.post('/api/send-message/:clientId', validateApiKey, async (req: Request, res: Response) => {
   try {
     const { clientId } = req.params;
     const { number, message } = req.body;
-    const apiKey = req.headers.authorization;
-
-    // Verificar API Key (opcional - puedes agregar validación aquí)
-    if (!apiKey) {
-      return res.status(401).json({ error: 'API Key required' });
-    }
 
     if (!number || !message) {
       return res.status(400).json({ 
@@ -261,16 +256,10 @@ router.post('/api/send-message/:clientId', async (req: Request, res: Response) =
 });
 
 // Enviar imagen (formato N8N con API Key)
-router.post('/api/send-image/:clientId', async (req: Request, res: Response) => {
+router.post('/api/send-image/:clientId', validateApiKey, async (req: Request, res: Response) => {
   try {
     const { clientId } = req.params;
     const { number, file, message } = req.body;
-    const apiKey = req.headers.authorization;
-
-    // Verificar API Key (opcional)
-    if (!apiKey) {
-      return res.status(401).json({ error: 'API Key required' });
-    }
 
     if (!number || !file) {
       return res.status(400).json({ 
