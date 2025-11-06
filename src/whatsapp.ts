@@ -3,6 +3,7 @@ import makeWASocket, {
   useMultiFileAuthState,
   WASocket,
   WAMessage,
+  downloadMediaMessage,
 } from '@whiskeysockets/baileys';
 import { Boom } from '@hapi/boom';
 import axios from 'axios';
@@ -15,6 +16,56 @@ import { messageService } from './services/message.service';
 import { createClient } from '@supabase/supabase-js';
 
 const sessions = new Map<string, WhatsAppSession>();
+
+/**
+ * Subir archivo de media a Supabase Storage
+ */
+async function uploadMediaToSupabase(
+  instanceId: string,
+  buffer: Buffer,
+  fileName: string,
+  mimeType: string
+): Promise<string | undefined> {
+  try {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+      console.error('Supabase credentials not configured');
+      return undefined;
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Crear path único: instance_id/YYYY-MM/filename
+    const date = new Date();
+    const yearMonth = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    const filePath = `${instanceId}/${yearMonth}/${fileName}`;
+
+    // Subir archivo
+    const { data, error } = await supabase.storage
+      .from('whatsapp-media')
+      .upload(filePath, buffer, {
+        contentType: mimeType,
+        upsert: false,
+      });
+
+    if (error) {
+      console.error('Error uploading to Supabase:', error);
+      return undefined;
+    }
+
+    // Obtener URL pública
+    const { data: urlData } = supabase.storage
+      .from('whatsapp-media')
+      .getPublicUrl(filePath);
+
+    return urlData.publicUrl;
+  } catch (error) {
+    console.error('Error in uploadMediaToSupabase:', error);
+    return undefined;
+  }
+}
 
 /**
  * Extraer texto completo del mensaje
@@ -339,17 +390,47 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
           // Extraer información adicional según el tipo
           let mediaUrl = undefined;
           let fileName = undefined;
+          let mimeType = undefined;
           
-          if (messageType === 'image' && msg.message?.imageMessage) {
-            fileName = (msg.message.imageMessage as any).fileName || 'image.jpg';
-          } else if (messageType === 'video' && msg.message?.videoMessage) {
-            fileName = (msg.message.videoMessage as any).fileName || 'video.mp4';
-          } else if (messageType === 'document' && msg.message?.documentMessage) {
-            fileName = (msg.message.documentMessage as any).fileName || 'document';
-          } else if (messageType === 'audio' && msg.message?.audioMessage) {
-            fileName = 'audio.mp3';
-          } else if (messageType === 'voice' && msg.message?.audioMessage) {
-            fileName = 'voice.ogg';
+          // Descargar media si existe
+          try {
+            if (messageType === 'image' && msg.message?.imageMessage) {
+              fileName = (msg.message.imageMessage as any).fileName || `image_${Date.now()}.jpg`;
+              mimeType = msg.message.imageMessage.mimetype || 'image/jpeg';
+              const buffer = await downloadMediaMessage(msg, 'buffer', {});
+              mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+            } else if (messageType === 'video' && msg.message?.videoMessage) {
+              fileName = (msg.message.videoMessage as any).fileName || `video_${Date.now()}.mp4`;
+              mimeType = msg.message.videoMessage.mimetype || 'video/mp4';
+              const buffer = await downloadMediaMessage(msg, 'buffer', {});
+              mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+            } else if (messageType === 'audio' && msg.message?.audioMessage) {
+              fileName = `audio_${Date.now()}.mp3`;
+              mimeType = msg.message.audioMessage.mimetype || 'audio/mpeg';
+              const buffer = await downloadMediaMessage(msg, 'buffer', {});
+              mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+            } else if (messageType === 'voice' && msg.message?.audioMessage) {
+              fileName = `voice_${Date.now()}.ogg`;
+              mimeType = msg.message.audioMessage.mimetype || 'audio/ogg';
+              const buffer = await downloadMediaMessage(msg, 'buffer', {});
+              mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+            } else if (messageType === 'document' && msg.message?.documentMessage) {
+              fileName = (msg.message.documentMessage as any).fileName || `document_${Date.now()}`;
+              mimeType = msg.message.documentMessage.mimetype || 'application/octet-stream';
+              const buffer = await downloadMediaMessage(msg, 'buffer', {});
+              mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+            } else if (messageType === 'sticker' && msg.message?.stickerMessage) {
+              fileName = `sticker_${Date.now()}.webp`;
+              mimeType = msg.message.stickerMessage.mimetype || 'image/webp';
+              const buffer = await downloadMediaMessage(msg, 'buffer', {});
+              mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+            }
+            
+            if (mediaUrl) {
+              console.log(`[${clientId}] 📎 Media uploaded: ${mediaUrl}`);
+            }
+          } catch (mediaError) {
+            console.error(`[${clientId}] ❌ Error downloading/uploading media:`, mediaError);
           }
           
           await messageService.saveMessage({
