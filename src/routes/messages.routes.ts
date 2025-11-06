@@ -36,6 +36,34 @@ router.get('/:instanceId/:chatId', async (req: Request, res: Response) => {
 });
 
 /**
+ * POST /api/messages/send
+ * Enviar mensaje de WhatsApp
+ */
+router.post('/send', async (req: Request, res: Response) => {
+  try {
+    const { instanceId, chatId, message } = req.body;
+
+    if (!instanceId || !chatId || !message) {
+      return res.status(400).json({ error: 'Missing required fields: instanceId, chatId, message' });
+    }
+
+    const result = await messageService.sendMessage(instanceId, chatId, message);
+
+    if (!result.success) {
+      return res.status(500).json({ error: result.error || 'Failed to send message' });
+    }
+
+    res.json({ 
+      success: true, 
+      messageId: result.messageId,
+      message: 'Message sent successfully' 
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
  * POST /api/messages/mark-read
  * Marcar chat como leído
  */

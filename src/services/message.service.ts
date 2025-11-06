@@ -56,6 +56,7 @@ export class MessageService {
    */
   async saveMessage(message: Message): Promise<boolean> {
     try {
+      // 1. Guardar el mensaje
       const { error } = await this.supabase
         .from('messages')
         .insert({
@@ -80,11 +81,80 @@ export class MessageService {
       }
 
       console.log(`💾 Message saved: ${message.message_id}`);
+
+      // 2. Actualizar o crear el chat
+      await this.updateOrCreateChat(message);
+
       return true;
     } catch (error) {
       console.error('Error saving message:', error);
       return false;
     }
+  }
+
+  /**
+   * Actualizar o crear chat con el último mensaje
+   */
+  private async updateOrCreateChat(message: Message): Promise<void> {
+    try {
+      // Verificar si el chat existe
+      const { data: existingChat } = await this.supabase
+        .from('chats')
+        .select('*')
+        .eq('instance_id', message.instance_id)
+        .eq('chat_id', message.chat_id)
+        .single();
+
+      const chatData = {
+        instance_id: message.instance_id,
+        chat_id: message.chat_id,
+        chat_name: message.sender_name || message.chat_id.split('@')[0],
+        chat_type: message.chat_id.includes('@g.us') ? 'group' : 'individual',
+        last_message_text: message.message_text || `${this.getMessageTypeLabel(message.message_type)}`,
+        last_message_at: message.timestamp.toISOString(),
+        unread_count: existingChat 
+          ? (message.from_me ? existingChat.unread_count : existingChat.unread_count + 1)
+          : (message.from_me ? 0 : 1),
+        is_archived: existingChat?.is_archived || false,
+        is_pinned: existingChat?.is_pinned || false,
+      };
+
+      if (existingChat) {
+        // Actualizar chat existente
+        await this.supabase
+          .from('chats')
+          .update(chatData)
+          .eq('instance_id', message.instance_id)
+          .eq('chat_id', message.chat_id);
+      } else {
+        // Crear nuevo chat
+        await this.supabase
+          .from('chats')
+          .insert(chatData);
+      }
+    } catch (error) {
+      console.error('Error updating/creating chat:', error);
+    }
+  }
+
+  /**
+   * Obtener etiqueta legible del tipo de mensaje
+   */
+  private getMessageTypeLabel(type: string): string {
+    const labels: Record<string, string> = {
+      image: '🖼️ Imagen',
+      video: '🎥 Video',
+      audio: '🎵 Audio',
+      voice: '🎤 Nota de voz',
+      document: '📄 Documento',
+      sticker: '🎨 Sticker',
+      location: '📍 Ubicación',
+      contact: '👤 Contacto',
+      contacts: '👥 Contactos',
+      poll: '📊 Encuesta',
+      reaction: '❤️ Reacción',
+    };
+    return labels[type] || '📎 Archivo';
   }
 
   /**
@@ -241,6 +311,53 @@ export class MessageService {
     } catch (error) {
       console.error('Error searching messages:', error);
       return [];
+    }
+  }
+
+  /**
+   * Enviar mensaje de WhatsApp
+   */
+  async sendMessage(instanceId: string, chatId: string, message: string): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    try {
+      // Obtener la sesión de WhatsApp desde el gestor de sesiones
+      const { getSession } = require('../whatsapp');
+      const session = getSession(instanceId);
+
+      if (!session || !session.socket) {
+        return { success: false, error: 'Instance not connected' };
+      }
+
+      // Enviar mensaje usando Baileys
+      const sentMessage = await session.socket.sendMessage(chatId, { text: message });
+
+      if (!sentMessage) {
+        return { success: false, error: 'Failed to send message' };
+      }
+
+      // Guardar mensaje en la base de datos
+      const messageData: Message = {
+        instance_id: instanceId,
+        chat_id: chatId,
+        message_id: sentMessage.key.id || `msg_${Date.now()}`,
+        message_text: message,
+        message_type: 'text',
+        from_me: true,
+        timestamp: new Date(),
+        is_read: false,
+      };
+
+      await this.saveMessage(messageData);
+
+      return { 
+        success: true, 
+        messageId: messageData.message_id 
+      };
+    } catch (error: any) {
+      console.error('Error sending message:', error);
+      return { 
+        success: false, 
+        error: error.message || 'Failed to send message' 
+      };
     }
   }
 }

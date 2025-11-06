@@ -17,6 +17,80 @@ import { createClient } from '@supabase/supabase-js';
 const sessions = new Map<string, WhatsAppSession>();
 
 /**
+ * Extraer texto completo del mensaje
+ * @param message - Objeto de mensaje de Baileys
+ * @returns Texto del mensaje o undefined
+ */
+function extractMessageText(message: any): string | undefined {
+  if (!message) return undefined;
+  
+  // Texto simple
+  if (message.conversation) return message.conversation;
+  
+  // Texto extendido (con formato, links, menciones, etc)
+  if (message.extendedTextMessage?.text) return message.extendedTextMessage.text;
+  
+  // Caption de imagen
+  if (message.imageMessage?.caption) return message.imageMessage.caption;
+  
+  // Caption de video
+  if (message.videoMessage?.caption) return message.videoMessage.caption;
+  
+  // Caption de documento
+  if (message.documentMessage?.caption) return message.documentMessage.caption;
+  
+  // Respuesta de botón
+  if (message.buttonsResponseMessage?.selectedButtonId) {
+    return `Botón: ${message.buttonsResponseMessage.selectedDisplayText || message.buttonsResponseMessage.selectedButtonId}`;
+  }
+  
+  // Respuesta de lista
+  if (message.listResponseMessage?.singleSelectReply?.selectedRowId) {
+    return `Lista: ${message.listResponseMessage.title || message.listResponseMessage.singleSelectReply.selectedRowId}`;
+  }
+  
+  // Template button reply
+  if (message.templateButtonReplyMessage?.selectedId) {
+    return `Botón: ${message.templateButtonReplyMessage.selectedDisplayText || message.templateButtonReplyMessage.selectedId}`;
+  }
+  
+  // Ubicación
+  if (message.locationMessage) {
+    const lat = message.locationMessage.degreesLatitude;
+    const lng = message.locationMessage.degreesLongitude;
+    return `📍 Ubicación: ${lat}, ${lng}`;
+  }
+  
+  // Contacto
+  if (message.contactMessage) {
+    return `👤 Contacto: ${message.contactMessage.displayName || 'Sin nombre'}`;
+  }
+  
+  // Contactos múltiples
+  if (message.contactsArrayMessage) {
+    const count = message.contactsArrayMessage.contacts?.length || 0;
+    return `👥 ${count} contacto(s)`;
+  }
+  
+  // Reacción
+  if (message.reactionMessage) {
+    return `${message.reactionMessage.text} (reacción)`;
+  }
+  
+  // Poll/Encuesta
+  if (message.pollCreationMessage) {
+    return `📊 Encuesta: ${message.pollCreationMessage.name}`;
+  }
+  
+  // Sticker (emoji o descripción)
+  if (message.stickerMessage) {
+    return '🎨 Sticker';
+  }
+  
+  return undefined;
+}
+
+/**
  * Detectar el tipo de mensaje de forma precisa
  * @param message - Objeto de mensaje de Baileys
  * @returns Tipo de mensaje legible
@@ -38,7 +112,8 @@ function detectMessageType(message: any): string {
   if (message.locationMessage) return 'location';
   if (message.liveLocationMessage) return 'location';
   if (message.contactMessage) return 'contact';
-  if (message.contactsArrayMessage) return 'contact';
+  if (message.contactsArrayMessage) return 'contacts';
+  if (message.buttonsResponseMessage) return 'button_reply';
   if (message.templateButtonReplyMessage) return 'button_reply';
   if (message.listResponseMessage) return 'list_reply';
   if (message.reactionMessage) return 'reaction';
@@ -248,20 +323,34 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
         
         // 💾 Guardar mensaje en la base de datos
         try {
-          const messageText = msg.message?.conversation || 
-                             msg.message?.extendedTextMessage?.text ||
-                             undefined;
-          const messageCaption = msg.message?.imageMessage?.caption ||
-                                msg.message?.videoMessage?.caption ||
-                                msg.message?.documentMessage?.caption ||
-                                undefined;
+          // Usar la nueva función para extraer texto completo
+          const messageText = extractMessageText(msg.message);
           const messageType = detectMessageType(msg.message);
           
-          console.log(`[${clientId}] 📋 Message type detected: ${messageType}`);
+          console.log(`[${clientId}] 📋 Message type: ${messageType}`);
+          if (messageText) {
+            console.log(`[${clientId}] 💬 Content: ${messageText.substring(0, 50)}${messageText.length > 50 ? '...' : ''}`);
+          }
           
           // Extraer nombre del contacto
           const senderName = msg.pushName || undefined;
           const senderPhone = remoteJid?.split('@')[0] || undefined;
+          
+          // Extraer información adicional según el tipo
+          let mediaUrl = undefined;
+          let fileName = undefined;
+          
+          if (messageType === 'image' && msg.message?.imageMessage) {
+            fileName = (msg.message.imageMessage as any).fileName || 'image.jpg';
+          } else if (messageType === 'video' && msg.message?.videoMessage) {
+            fileName = (msg.message.videoMessage as any).fileName || 'video.mp4';
+          } else if (messageType === 'document' && msg.message?.documentMessage) {
+            fileName = (msg.message.documentMessage as any).fileName || 'document';
+          } else if (messageType === 'audio' && msg.message?.audioMessage) {
+            fileName = 'audio.mp3';
+          } else if (messageType === 'voice' && msg.message?.audioMessage) {
+            fileName = 'voice.ogg';
+          }
           
           await messageService.saveMessage({
             instance_id: clientId,
@@ -270,13 +359,16 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
             sender_name: senderName,
             sender_phone: senderPhone,
             message_text: messageText,
-            message_caption: messageCaption,
+            message_caption: undefined, // Ya incluido en messageText
             message_type: messageType,
+            media_url: mediaUrl,
             from_me: fromMe || false,
             timestamp: new Date(msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now()),
             is_read: fromMe || false,
-            metadata: msg,
+            metadata: { ...msg, fileName },
           });
+          
+          console.log(`[${clientId}] ✅ Message saved to database`);
         } catch (dbError) {
           console.error(`[${clientId}] ❌ Error saving message to DB:`, dbError);
         }
