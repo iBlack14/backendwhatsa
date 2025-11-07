@@ -1,9 +1,10 @@
 -- =====================================================
 -- SCHEMA COMPLETO PARA SUPABASE - BLXK WHATSAPP
 -- =====================================================
--- Versión: 2.0
--- Fecha: 2025-10-31
+-- Versión: 3.0
+-- Fecha: 2025-11-07
 -- Descripción: Schema completo con todas las tablas, políticas RLS, triggers e índices
+-- Incluye: Sistema de API Keys, Plan Gratuito Automático, Manejo de Usernames Duplicados
 -- Uso: Ejecutar en Supabase SQL Editor para crear toda la estructura
 -- =====================================================
 
@@ -253,17 +254,59 @@ CREATE TRIGGER update_user_subscriptions_updated_at
 -- Función para crear perfil automáticamente al registrarse
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
+DECLARE
+  v_username TEXT;
+  v_base_username TEXT;
+  v_counter INTEGER := 1;
+  v_exists BOOLEAN;
 BEGIN
-  INSERT INTO public.profiles (id, created_by_google, username)
+  -- Obtener username base del metadata o email
+  v_base_username := COALESCE(
+    NEW.raw_user_meta_data->>'username',
+    NEW.raw_user_meta_data->>'name',
+    split_part(NEW.email, '@', 1)
+  );
+  
+  v_username := v_base_username;
+  
+  -- Si el username ya existe, agregar sufijo numérico
+  LOOP
+    SELECT EXISTS(
+      SELECT 1 FROM public.profiles WHERE username = v_username
+    ) INTO v_exists;
+    
+    EXIT WHEN NOT v_exists;
+    
+    v_username := v_base_username || '_' || v_counter;
+    v_counter := v_counter + 1;
+    
+    -- Máximo 100 intentos
+    EXIT WHEN v_counter > 100;
+  END LOOP;
+  
+  -- Crear perfil para el nuevo usuario con plan gratuito
+  INSERT INTO public.profiles (
+    id, 
+    username,
+    created_by_google,
+    status_plan, 
+    plan_type,
+    created_at
+  )
   VALUES (
     NEW.id,
-    CASE 
-      WHEN NEW.raw_app_meta_data->>'provider' = 'google' THEN true
-      ELSE false
-    END,
-    COALESCE(NEW.raw_user_meta_data->>'name', NEW.email)
+    v_username,
+    CASE WHEN NEW.raw_app_meta_data->>'provider' = 'google' THEN true ELSE false END,
+    true,  -- ✅ Plan activo por defecto
+    'free',  -- ✅ Plan gratuito
+    NOW()
   )
   ON CONFLICT (id) DO NOTHING;
+  
+  RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+  -- Log del error pero no bloquear el registro
+  RAISE WARNING 'Error creando perfil para usuario %: %', NEW.id, SQLERRM;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -1127,34 +1170,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- Actualizar trigger de creación de usuario para activar plan Free
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER AS $$
-BEGIN
-  INSERT INTO public.profiles (
-    id, 
-    created_by_google, 
-    username,
-    status_plan,
-    plan_type,
-    plan_expires_at,
-    api_key
-  )
-  VALUES (
-    NEW.id,
-    CASE WHEN NEW.raw_app_meta_data->>'provider' = 'google' THEN true ELSE false END,
-    COALESCE(NEW.raw_user_meta_data->>'name', NEW.email),
-    true,
-    'free',
-    NULL,
-    'sk_' || encode(gen_random_bytes(32), 'hex')
-  )
-  ON CONFLICT (id) DO NOTHING;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Actualizar usuarios existentes con plan Free
+-- Actualizar usuarios existentes con plan Free y generar API keys
 UPDATE public.profiles
 SET 
   status_plan = true,
@@ -1760,9 +1776,19 @@ RETURNS TRIGGER AS $$
 BEGIN
   -- Si no tiene API key, generar una
   IF NEW.api_key IS NULL OR NEW.api_key = '' THEN
-    NEW.api_key := generate_api_key();
+    BEGIN
+      NEW.api_key := generate_api_key();
+    EXCEPTION WHEN OTHERS THEN
+      -- Si falla, usar un valor por defecto temporal
+      NEW.api_key := 'sk_live_' || encode(gen_random_bytes(24), 'hex');
+      RAISE WARNING 'Error generando API key, usando valor temporal: %', SQLERRM;
+    END;
   END IF;
   
+  RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+  -- Si todo falla, permitir que el registro continúe sin API key
+  RAISE WARNING 'Error en trigger auto_generate_api_key: %', SQLERRM;
   RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
