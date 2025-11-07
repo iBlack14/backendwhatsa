@@ -325,12 +325,12 @@ export class MessageService {
       const { getSession } = require('../whatsapp');
       const session = getSession(instanceId);
 
-      if (!session || !session.socket) {
+      if (!session || !session.sock) {
         return { success: false, error: 'Instance not connected' };
       }
 
       // Enviar mensaje usando Baileys
-      const sentMessage = await session.socket.sendMessage(chatId, { text: message });
+      const sentMessage = await session.sock.sendMessage(chatId, { text: message });
 
       if (!sentMessage) {
         return { success: false, error: 'Failed to send message' };
