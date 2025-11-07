@@ -1393,5 +1393,330 @@ COMMENT ON COLUMN public.instances.template_config IS 'Configuración específic
 COMMENT ON VIEW public.user_template_resources IS 'Resumen de uso de recursos por templates del usuario';
 
 -- =====================================================
+-- 16. CONTADORES ANTI-BAN Y RATE LIMITING
+-- =====================================================
+
+-- Tabla de contadores anti-ban (persistencia)
+CREATE TABLE IF NOT EXISTS public.anti_ban_counters (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  instance_id TEXT NOT NULL UNIQUE,
+  user_id UUID NOT NULL,
+  messages_sent_today INTEGER DEFAULT 0,
+  messages_sent_this_hour INTEGER DEFAULT 0,
+  recent_errors INTEGER DEFAULT 0,
+  last_reset_day DATE DEFAULT CURRENT_DATE,
+  last_reset_hour INTEGER DEFAULT EXTRACT(HOUR FROM NOW()),
+  last_error_time TIMESTAMPTZ,
+  last_activity TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT anti_ban_counters_user_id_fkey FOREIGN KEY (user_id) 
+    REFERENCES auth.users(id) ON DELETE CASCADE,
+  CONSTRAINT anti_ban_counters_instance_id_fkey FOREIGN KEY (instance_id) 
+    REFERENCES public.instances(document_id) ON DELETE CASCADE
+);
+
+-- Tabla de rate limiting por usuario
+CREATE TABLE IF NOT EXISTS public.rate_limits (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL,
+  endpoint TEXT NOT NULL,
+  request_count INTEGER DEFAULT 0,
+  window_start TIMESTAMPTZ DEFAULT NOW(),
+  last_request TIMESTAMPTZ DEFAULT NOW(),
+  blocked_until TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT rate_limits_user_id_fkey FOREIGN KEY (user_id) 
+    REFERENCES auth.users(id) ON DELETE CASCADE,
+  UNIQUE(user_id, endpoint)
+);
+
+-- Tabla de rate limiting por IP (backup)
+CREATE TABLE IF NOT EXISTS public.rate_limits_ip (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  ip_address TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  request_count INTEGER DEFAULT 0,
+  window_start TIMESTAMPTZ DEFAULT NOW(),
+  last_request TIMESTAMPTZ DEFAULT NOW(),
+  blocked_until TIMESTAMPTZ,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(ip_address, endpoint)
+);
+
+-- Índices para performance
+CREATE INDEX IF NOT EXISTS idx_anti_ban_counters_instance_id ON public.anti_ban_counters(instance_id);
+CREATE INDEX IF NOT EXISTS idx_anti_ban_counters_user_id ON public.anti_ban_counters(user_id);
+CREATE INDEX IF NOT EXISTS idx_anti_ban_counters_last_activity ON public.anti_ban_counters(last_activity);
+
+CREATE INDEX IF NOT EXISTS idx_rate_limits_user_endpoint ON public.rate_limits(user_id, endpoint);
+CREATE INDEX IF NOT EXISTS idx_rate_limits_window_start ON public.rate_limits(window_start);
+
+CREATE INDEX IF NOT EXISTS idx_rate_limits_ip_endpoint ON public.rate_limits_ip(ip_address, endpoint);
+CREATE INDEX IF NOT EXISTS idx_rate_limits_ip_window_start ON public.rate_limits_ip(window_start);
+
+-- RLS para contadores
+ALTER TABLE public.anti_ban_counters ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.rate_limits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.rate_limits_ip ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view own counters" ON public.anti_ban_counters;
+CREATE POLICY "Users can view own counters"
+  ON public.anti_ban_counters FOR SELECT
+  USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can manage own counters" ON public.anti_ban_counters;
+CREATE POLICY "Users can manage own counters"
+  ON public.anti_ban_counters FOR ALL
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can view own rate limits" ON public.rate_limits;
+CREATE POLICY "Users can view own rate limits"
+  ON public.rate_limits FOR SELECT
+  USING (auth.uid() = user_id);
+
+-- Triggers para updated_at
+DROP TRIGGER IF EXISTS update_anti_ban_counters_updated_at ON public.anti_ban_counters;
+CREATE TRIGGER update_anti_ban_counters_updated_at 
+  BEFORE UPDATE ON public.anti_ban_counters
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Función para obtener/crear contador anti-ban
+CREATE OR REPLACE FUNCTION get_or_create_anti_ban_counter(
+  p_instance_id TEXT,
+  p_user_id UUID
+)
+RETURNS TABLE (
+  messages_sent_today INTEGER,
+  messages_sent_this_hour INTEGER,
+  recent_errors INTEGER,
+  last_reset_day DATE,
+  last_reset_hour INTEGER
+) AS $$
+DECLARE
+  v_counter RECORD;
+  v_current_day DATE := CURRENT_DATE;
+  v_current_hour INTEGER := EXTRACT(HOUR FROM NOW());
+BEGIN
+  -- Intentar obtener contador existente
+  SELECT * INTO v_counter
+  FROM public.anti_ban_counters
+  WHERE instance_id = p_instance_id;
+  
+  -- Si no existe, crear uno nuevo
+  IF NOT FOUND THEN
+    INSERT INTO public.anti_ban_counters (
+      instance_id,
+      user_id,
+      messages_sent_today,
+      messages_sent_this_hour,
+      recent_errors,
+      last_reset_day,
+      last_reset_hour
+    ) VALUES (
+      p_instance_id,
+      p_user_id,
+      0,
+      0,
+      0,
+      v_current_day,
+      v_current_hour
+    )
+    RETURNING * INTO v_counter;
+  ELSE
+    -- Resetear contador diario si cambió el día
+    IF v_counter.last_reset_day < v_current_day THEN
+      UPDATE public.anti_ban_counters
+      SET 
+        messages_sent_today = 0,
+        messages_sent_this_hour = 0,
+        last_reset_day = v_current_day,
+        last_reset_hour = v_current_hour,
+        last_activity = NOW()
+      WHERE instance_id = p_instance_id
+      RETURNING * INTO v_counter;
+    END IF;
+    
+    -- Resetear contador por hora si cambió la hora
+    IF v_counter.last_reset_hour < v_current_hour THEN
+      UPDATE public.anti_ban_counters
+      SET 
+        messages_sent_this_hour = 0,
+        last_reset_hour = v_current_hour,
+        last_activity = NOW()
+      WHERE instance_id = p_instance_id
+      RETURNING * INTO v_counter;
+    END IF;
+  END IF;
+  
+  RETURN QUERY SELECT 
+    v_counter.messages_sent_today,
+    v_counter.messages_sent_this_hour,
+    v_counter.recent_errors,
+    v_counter.last_reset_day,
+    v_counter.last_reset_hour;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Función para incrementar contador de mensajes
+CREATE OR REPLACE FUNCTION increment_anti_ban_counter(
+  p_instance_id TEXT
+)
+RETURNS void AS $$
+BEGIN
+  UPDATE public.anti_ban_counters
+  SET 
+    messages_sent_today = messages_sent_today + 1,
+    messages_sent_this_hour = messages_sent_this_hour + 1,
+    last_activity = NOW(),
+    updated_at = NOW()
+  WHERE instance_id = p_instance_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Función para registrar error
+CREATE OR REPLACE FUNCTION record_anti_ban_error(
+  p_instance_id TEXT
+)
+RETURNS void AS $$
+BEGIN
+  UPDATE public.anti_ban_counters
+  SET 
+    recent_errors = recent_errors + 1,
+    last_error_time = NOW(),
+    last_activity = NOW(),
+    updated_at = NOW()
+  WHERE instance_id = p_instance_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Función para verificar rate limit por usuario
+CREATE OR REPLACE FUNCTION check_rate_limit(
+  p_user_id UUID,
+  p_endpoint TEXT,
+  p_limit INTEGER DEFAULT 100,
+  p_window_minutes INTEGER DEFAULT 60
+)
+RETURNS TABLE (
+  allowed BOOLEAN,
+  current_count INTEGER,
+  reset_at TIMESTAMPTZ
+) AS $$
+DECLARE
+  v_limit RECORD;
+  v_window_start TIMESTAMPTZ;
+  v_now TIMESTAMPTZ := NOW();
+BEGIN
+  -- Calcular inicio de ventana
+  v_window_start := v_now - (p_window_minutes || ' minutes')::INTERVAL;
+  
+  -- Obtener o crear registro de rate limit
+  SELECT * INTO v_limit
+  FROM public.rate_limits
+  WHERE user_id = p_user_id AND endpoint = p_endpoint;
+  
+  -- Si no existe, crear
+  IF NOT FOUND THEN
+    INSERT INTO public.rate_limits (user_id, endpoint, request_count, window_start, last_request)
+    VALUES (p_user_id, p_endpoint, 1, v_now, v_now)
+    RETURNING * INTO v_limit;
+    
+    RETURN QUERY SELECT true, 1, v_now + (p_window_minutes || ' minutes')::INTERVAL;
+    RETURN;
+  END IF;
+  
+  -- Verificar si está bloqueado
+  IF v_limit.blocked_until IS NOT NULL AND v_limit.blocked_until > v_now THEN
+    RETURN QUERY SELECT false, v_limit.request_count, v_limit.blocked_until;
+    RETURN;
+  END IF;
+  
+  -- Verificar si la ventana expiró
+  IF v_limit.window_start < v_window_start THEN
+    -- Resetear contador
+    UPDATE public.rate_limits
+    SET 
+      request_count = 1,
+      window_start = v_now,
+      last_request = v_now,
+      blocked_until = NULL
+    WHERE user_id = p_user_id AND endpoint = p_endpoint;
+    
+    RETURN QUERY SELECT true, 1, v_now + (p_window_minutes || ' minutes')::INTERVAL;
+    RETURN;
+  END IF;
+  
+  -- Incrementar contador
+  UPDATE public.rate_limits
+  SET 
+    request_count = request_count + 1,
+    last_request = v_now
+  WHERE user_id = p_user_id AND endpoint = p_endpoint
+  RETURNING request_count INTO v_limit;
+  
+  -- Verificar si excedió el límite
+  IF v_limit.request_count > p_limit THEN
+    -- Bloquear por el resto de la ventana
+    UPDATE public.rate_limits
+    SET blocked_until = window_start + (p_window_minutes || ' minutes')::INTERVAL
+    WHERE user_id = p_user_id AND endpoint = p_endpoint;
+    
+    RETURN QUERY SELECT false, v_limit.request_count, v_limit.window_start + (p_window_minutes || ' minutes')::INTERVAL;
+    RETURN;
+  END IF;
+  
+  RETURN QUERY SELECT true, v_limit.request_count, v_limit.window_start + (p_window_minutes || ' minutes')::INTERVAL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Función de limpieza de instancias inactivas (> 24 horas)
+CREATE OR REPLACE FUNCTION cleanup_inactive_instances()
+RETURNS INTEGER AS $$
+DECLARE
+  v_deleted INTEGER;
+BEGIN
+  -- Eliminar contadores de instancias inactivas por más de 24 horas
+  DELETE FROM public.anti_ban_counters
+  WHERE last_activity < NOW() - INTERVAL '24 hours';
+  
+  GET DIAGNOSTICS v_deleted = ROW_COUNT;
+  
+  RETURN v_deleted;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Función de limpieza de rate limits antiguos
+CREATE OR REPLACE FUNCTION cleanup_old_rate_limits()
+RETURNS INTEGER AS $$
+DECLARE
+  v_deleted INTEGER;
+BEGIN
+  -- Eliminar rate limits de más de 7 días
+  DELETE FROM public.rate_limits
+  WHERE window_start < NOW() - INTERVAL '7 days';
+  
+  DELETE FROM public.rate_limits_ip
+  WHERE window_start < NOW() - INTERVAL '7 days';
+  
+  GET DIAGNOSTICS v_deleted = ROW_COUNT;
+  
+  RETURN v_deleted;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Comentarios
+COMMENT ON TABLE public.anti_ban_counters IS 'Contadores persistentes para sistema anti-ban';
+COMMENT ON TABLE public.rate_limits IS 'Rate limiting por usuario y endpoint';
+COMMENT ON TABLE public.rate_limits_ip IS 'Rate limiting por IP (backup)';
+COMMENT ON FUNCTION get_or_create_anti_ban_counter IS 'Obtiene o crea contador anti-ban con reset automático';
+COMMENT ON FUNCTION check_rate_limit IS 'Verifica y aplica rate limit por usuario';
+COMMENT ON FUNCTION cleanup_inactive_instances IS 'Elimina contadores de instancias inactivas > 24h';
+
+ANALYZE public.anti_ban_counters;
+ANALYZE public.rate_limits;
+ANALYZE public.rate_limits_ip;
+
+-- =====================================================
 -- FIN DEL SCHEMA
 -- =====================================================
