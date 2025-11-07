@@ -514,6 +514,7 @@ ANALYZE public.spam_progress;
 
 CREATE TABLE IF NOT EXISTS public.proxies (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL,  -- Cada usuario tiene sus propios proxies
   name TEXT NOT NULL,
   type TEXT NOT NULL CHECK (type IN ('http', 'https', 'socks4', 'socks5')),
   host TEXT NOT NULL,
@@ -529,8 +530,24 @@ CREATE TABLE IF NOT EXISTS public.proxies (
   usage_count INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
-  UNIQUE(host, port)
+  CONSTRAINT proxies_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,
+  UNIQUE(user_id, host, port)  -- Único por usuario
 );
+
+-- Agregar columna user_id si no existe (para BD existentes)
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'proxies' 
+    AND column_name = 'user_id'
+  ) THEN
+    ALTER TABLE public.proxies ADD COLUMN user_id UUID;
+    ALTER TABLE public.proxies ADD CONSTRAINT proxies_user_id_fkey 
+      FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;
+  END IF;
+END $$;
 
 -- =====================================================
 -- 2. TABLA DE ASIGNACIÓN DE PROXIES A INSTANCIAS
@@ -590,6 +607,7 @@ CREATE TABLE IF NOT EXISTS public.chats (
 -- =====================================================
 
 -- Índices para proxies
+CREATE INDEX IF NOT EXISTS idx_proxies_user_id ON public.proxies(user_id);  -- ✅ Índice por usuario
 CREATE INDEX IF NOT EXISTS idx_proxies_is_active ON public.proxies(is_active) WHERE is_active = true;
 CREATE INDEX IF NOT EXISTS idx_proxies_is_healthy ON public.proxies(is_healthy) WHERE is_healthy = true;
 CREATE INDEX IF NOT EXISTS idx_proxies_type ON public.proxies(type);
@@ -703,12 +721,21 @@ ALTER TABLE public.proxies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.instance_proxies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chats ENABLE ROW LEVEL SECURITY;
 
--- Políticas para proxies (solo admin puede ver/editar)
+-- Políticas para proxies (cada usuario ve solo sus propios proxies)
 DROP POLICY IF EXISTS "Service role can manage proxies" ON public.proxies;
-CREATE POLICY "Service role can manage proxies"
+DROP POLICY IF EXISTS "Users can view own proxies" ON public.proxies;
+DROP POLICY IF EXISTS "Users can manage own proxies" ON public.proxies;
+
+-- ✅ Usuarios solo ven sus propios proxies
+CREATE POLICY "Users can view own proxies"
+  ON public.proxies FOR SELECT
+  USING (auth.uid() = user_id);
+
+-- ✅ Usuarios solo pueden crear/editar/eliminar sus propios proxies
+CREATE POLICY "Users can manage own proxies"
   ON public.proxies FOR ALL
-  USING (true)
-  WITH CHECK (true);
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
 
 -- Políticas para instance_proxies (usuarios ven sus propias instancias)
 DROP POLICY IF EXISTS "Users can view their instance proxies" ON public.instance_proxies;
@@ -752,10 +779,12 @@ CREATE POLICY "Users can update their chats"
 -- 8. VISTAS ÚTILES
 -- =====================================================
 
--- Vista de proxies disponibles
-CREATE OR REPLACE VIEW public.available_proxies AS
+-- Vista de proxies disponibles (RLS filtra automáticamente por usuario)
+DROP VIEW IF EXISTS public.available_proxies;
+CREATE VIEW public.available_proxies AS
 SELECT 
   id,
+  user_id,  -- ✅ Incluir user_id
   name,
   type,
   host,
@@ -796,8 +825,8 @@ ORDER BY m.timestamp DESC;
 -- 9. FUNCIONES ÚTILES
 -- =====================================================
 
--- Función para obtener proxy disponible
-CREATE OR REPLACE FUNCTION get_available_proxy()
+-- Función para obtener proxy disponible del usuario
+CREATE OR REPLACE FUNCTION get_available_proxy(p_user_id UUID DEFAULT NULL)
 RETURNS TABLE (
   id UUID,
   name TEXT,
@@ -807,7 +836,12 @@ RETURNS TABLE (
   username TEXT,
   password TEXT
 ) AS $$
+DECLARE
+  v_user_id UUID;
 BEGIN
+  -- Si no se pasa user_id, usar el usuario autenticado
+  v_user_id := COALESCE(p_user_id, auth.uid());
+  
   RETURN QUERY
   SELECT 
     p.id,
@@ -818,11 +852,13 @@ BEGIN
     p.username,
     p.password
   FROM public.proxies p
-  WHERE p.is_active = true AND p.is_healthy = true
+  WHERE p.user_id = v_user_id  -- ✅ Solo proxies del usuario
+    AND p.is_active = true 
+    AND p.is_healthy = true
   ORDER BY p.usage_count ASC, p.last_health_check DESC
   LIMIT 1;
 END;
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Función para marcar mensajes como leídos
 CREATE OR REPLACE FUNCTION mark_chat_as_read(p_instance_id TEXT, p_chat_id TEXT)
@@ -873,6 +909,268 @@ COMMENT ON COLUMN public.chats.unread_count IS 'Cantidad de mensajes no leídos 
 ANALYZE public.proxies;
 ANALYZE public.instance_proxies;
 ANALYZE public.chats;
+
+-- =====================================================
+-- 13. SISTEMA DE PLAN FREE CON LÍMITES
+-- =====================================================
+
+-- Tabla de límites por plan
+CREATE TABLE IF NOT EXISTS public.plan_limits (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  plan_type TEXT NOT NULL UNIQUE CHECK (plan_type IN ('free', 'trial', 'basic', 'premium', 'enterprise')),
+  max_instances INTEGER NOT NULL DEFAULT 1,
+  max_messages_per_day INTEGER NOT NULL DEFAULT 100,
+  max_webhooks INTEGER NOT NULL DEFAULT 1,
+  max_suites INTEGER NOT NULL DEFAULT 0,
+  can_use_proxies BOOLEAN DEFAULT false,
+  can_use_suites BOOLEAN DEFAULT false,
+  support_level TEXT DEFAULT 'email' CHECK (support_level IN ('email', 'priority', '24/7', 'dedicated')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Agregar columna max_suites si no existe (para BD existentes)
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'plan_limits' 
+    AND column_name = 'max_suites'
+  ) THEN
+    ALTER TABLE public.plan_limits ADD COLUMN max_suites INTEGER NOT NULL DEFAULT 0;
+  END IF;
+END $$;
+
+-- Insertar límites de planes
+INSERT INTO public.plan_limits (plan_type, max_instances, max_messages_per_day, max_webhooks, max_suites, can_use_proxies, can_use_suites, support_level)
+VALUES 
+  ('free', 1, 100, 1, 1, false, true, 'email'),
+  ('trial', 2, 500, 3, 2, true, true, 'priority'),
+  ('basic', 3, 1000, 5, 3, true, true, 'priority'),
+  ('premium', 10, 10000, 20, 10, true, true, '24/7'),
+  ('enterprise', 999, 999999, 999, 999, true, true, 'dedicated')
+ON CONFLICT (plan_type) DO UPDATE SET
+  max_instances = EXCLUDED.max_instances,
+  max_messages_per_day = EXCLUDED.max_messages_per_day,
+  max_webhooks = EXCLUDED.max_webhooks,
+  max_suites = EXCLUDED.max_suites,
+  can_use_proxies = EXCLUDED.can_use_proxies,
+  can_use_suites = EXCLUDED.can_use_suites,
+  support_level = EXCLUDED.support_level;
+
+-- Tabla de uso diario (tracking)
+CREATE TABLE IF NOT EXISTS public.daily_usage (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL,
+  usage_date DATE NOT NULL DEFAULT CURRENT_DATE,
+  messages_sent INTEGER DEFAULT 0,
+  instances_created INTEGER DEFAULT 0,
+  webhooks_used INTEGER DEFAULT 0,
+  suites_created INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT daily_usage_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE,
+  UNIQUE(user_id, usage_date)
+);
+
+-- Agregar columna suites_created si no existe (para BD existentes)
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'daily_usage' 
+    AND column_name = 'suites_created'
+  ) THEN
+    ALTER TABLE public.daily_usage ADD COLUMN suites_created INTEGER DEFAULT 0;
+  END IF;
+END $$;
+
+-- Índices para daily_usage
+CREATE INDEX IF NOT EXISTS idx_daily_usage_user_date ON public.daily_usage(user_id, usage_date DESC);
+CREATE INDEX IF NOT EXISTS idx_daily_usage_date ON public.daily_usage(usage_date DESC);
+
+-- Habilitar RLS
+ALTER TABLE public.plan_limits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.daily_usage ENABLE ROW LEVEL SECURITY;
+
+-- Políticas RLS
+DROP POLICY IF EXISTS "Anyone can view plan limits" ON public.plan_limits;
+CREATE POLICY "Anyone can view plan limits"
+  ON public.plan_limits FOR SELECT
+  USING (true);
+
+DROP POLICY IF EXISTS "Users can view own usage" ON public.daily_usage;
+CREATE POLICY "Users can view own usage"
+  ON public.daily_usage FOR SELECT
+  USING (auth.uid() = user_id);
+
+-- Función para incrementar uso diario
+CREATE OR REPLACE FUNCTION increment_daily_usage(
+  p_user_id UUID,
+  p_usage_type TEXT,
+  p_increment INTEGER DEFAULT 1
+)
+RETURNS VOID AS $$
+BEGIN
+  INSERT INTO public.daily_usage (user_id, usage_date, messages_sent, instances_created, webhooks_used, suites_created)
+  VALUES (
+    p_user_id,
+    CURRENT_DATE,
+    CASE WHEN p_usage_type = 'messages_sent' THEN p_increment ELSE 0 END,
+    CASE WHEN p_usage_type = 'instances_created' THEN p_increment ELSE 0 END,
+    CASE WHEN p_usage_type = 'webhooks_used' THEN p_increment ELSE 0 END,
+    CASE WHEN p_usage_type = 'suites_created' THEN p_increment ELSE 0 END
+  )
+  ON CONFLICT (user_id, usage_date) DO UPDATE SET
+    messages_sent = CASE WHEN p_usage_type = 'messages_sent' THEN daily_usage.messages_sent + p_increment ELSE daily_usage.messages_sent END,
+    instances_created = CASE WHEN p_usage_type = 'instances_created' THEN daily_usage.instances_created + p_increment ELSE daily_usage.instances_created END,
+    webhooks_used = CASE WHEN p_usage_type = 'webhooks_used' THEN daily_usage.webhooks_used + p_increment ELSE daily_usage.webhooks_used END,
+    suites_created = CASE WHEN p_usage_type = 'suites_created' THEN daily_usage.suites_created + p_increment ELSE daily_usage.suites_created END,
+    updated_at = NOW();
+END;
+$$ LANGUAGE plpgsql;
+
+-- Función para verificar límites
+CREATE OR REPLACE FUNCTION check_user_limit(
+  p_user_id UUID,
+  p_limit_type TEXT
+)
+RETURNS TABLE (
+  allowed BOOLEAN,
+  current_usage INTEGER,
+  max_limit INTEGER,
+  plan_type TEXT
+) AS $$
+DECLARE
+  v_plan_type TEXT;
+  v_current_usage INTEGER;
+  v_max_limit INTEGER;
+BEGIN
+  SELECT p.plan_type INTO v_plan_type FROM public.profiles p WHERE p.id = p_user_id;
+
+  IF p_limit_type = 'instances' THEN
+    SELECT pl.max_instances INTO v_max_limit FROM public.plan_limits pl WHERE pl.plan_type = v_plan_type;
+    SELECT COUNT(*) INTO v_current_usage FROM public.instances i WHERE i.user_id = p_user_id AND i.is_active = true;
+  ELSIF p_limit_type = 'messages' THEN
+    SELECT pl.max_messages_per_day INTO v_max_limit FROM public.plan_limits pl WHERE pl.plan_type = v_plan_type;
+    SELECT COALESCE(du.messages_sent, 0) INTO v_current_usage FROM public.daily_usage du WHERE du.user_id = p_user_id AND du.usage_date = CURRENT_DATE;
+  ELSIF p_limit_type = 'webhooks' THEN
+    SELECT pl.max_webhooks INTO v_max_limit FROM public.plan_limits pl WHERE pl.plan_type = v_plan_type;
+    SELECT COUNT(DISTINCT webhook_url) INTO v_current_usage FROM public.instances i WHERE i.user_id = p_user_id AND i.webhook_url IS NOT NULL;
+  ELSIF p_limit_type = 'suites' THEN
+    SELECT pl.max_suites INTO v_max_limit FROM public.plan_limits pl WHERE pl.plan_type = v_plan_type;
+    SELECT COUNT(*) INTO v_current_usage FROM public.suites s WHERE s.user_id = p_user_id AND s.activo = true;
+  END IF;
+
+  RETURN QUERY SELECT 
+    (v_current_usage < v_max_limit) as allowed,
+    COALESCE(v_current_usage, 0) as current_usage,
+    COALESCE(v_max_limit, 0) as max_limit,
+    v_plan_type as plan_type;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger para tracking de mensajes
+CREATE OR REPLACE FUNCTION track_message_usage()
+RETURNS TRIGGER AS $$
+DECLARE
+  v_user_id UUID;
+BEGIN
+  IF NEW.from_me = true THEN
+    SELECT user_id INTO v_user_id FROM public.instances WHERE document_id = NEW.instance_id;
+    IF v_user_id IS NOT NULL THEN
+      PERFORM increment_daily_usage(v_user_id, 'messages_sent', 1);
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_track_message_usage ON public.messages;
+CREATE TRIGGER trigger_track_message_usage
+  AFTER INSERT ON public.messages
+  FOR EACH ROW
+  EXECUTE FUNCTION track_message_usage();
+
+-- Vista de uso actual del usuario
+DROP VIEW IF EXISTS public.user_usage_summary;
+CREATE VIEW public.user_usage_summary AS
+SELECT 
+  p.id as user_id,
+  p.username,
+  p.plan_type,
+  p.status_plan,
+  pl.max_instances,
+  pl.max_messages_per_day,
+  pl.max_webhooks,
+  pl.max_suites,
+  (SELECT COUNT(*) FROM public.instances WHERE user_id = p.id AND is_active = true) as current_instances,
+  COALESCE(du.messages_sent, 0) as messages_sent_today,
+  (SELECT COUNT(DISTINCT webhook_url) FROM public.instances WHERE user_id = p.id AND webhook_url IS NOT NULL) as current_webhooks,
+  (SELECT COUNT(*) FROM public.suites WHERE user_id = p.id AND activo = true) as current_suites,
+  ROUND((COALESCE(du.messages_sent, 0)::NUMERIC / pl.max_messages_per_day::NUMERIC) * 100, 2) as messages_usage_percent
+FROM public.profiles p
+LEFT JOIN public.plan_limits pl ON p.plan_type = pl.plan_type
+LEFT JOIN public.daily_usage du ON p.id = du.user_id AND du.usage_date = CURRENT_DATE;
+
+-- Función de limpieza
+CREATE OR REPLACE FUNCTION cleanup_old_usage_records()
+RETURNS INTEGER AS $$
+DECLARE
+    deleted_count INTEGER;
+BEGIN
+    DELETE FROM public.daily_usage WHERE usage_date < CURRENT_DATE - INTERVAL '30 days';
+    GET DIAGNOSTICS deleted_count = ROW_COUNT;
+    RETURN deleted_count;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Actualizar trigger de creación de usuario para activar plan Free
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER AS $$
+BEGIN
+  INSERT INTO public.profiles (
+    id, 
+    created_by_google, 
+    username,
+    status_plan,
+    plan_type,
+    plan_expires_at,
+    api_key
+  )
+  VALUES (
+    NEW.id,
+    CASE WHEN NEW.raw_app_meta_data->>'provider' = 'google' THEN true ELSE false END,
+    COALESCE(NEW.raw_user_meta_data->>'name', NEW.email),
+    true,
+    'free',
+    NULL,
+    'sk_' || encode(gen_random_bytes(32), 'hex')
+  )
+  ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Actualizar usuarios existentes con plan Free
+UPDATE public.profiles
+SET 
+  status_plan = true,
+  plan_type = 'free',
+  plan_expires_at = NULL
+WHERE status_plan = false OR status_plan IS NULL;
+
+-- Comentarios
+COMMENT ON TABLE public.plan_limits IS 'Límites de uso por tipo de plan';
+COMMENT ON TABLE public.daily_usage IS 'Tracking de uso diario por usuario';
+COMMENT ON FUNCTION check_user_limit IS 'Verifica si el usuario puede realizar una acción según su plan';
+COMMENT ON FUNCTION increment_daily_usage IS 'Incrementa el contador de uso diario';
+COMMENT ON VIEW public.user_usage_summary IS 'Resumen del uso actual vs límites del plan';
+
+ANALYZE public.plan_limits;
+ANALYZE public.daily_usage;
 
 -- =====================================================
 -- FIN DEL SCHEMA
