@@ -349,6 +349,7 @@ router.post('/api/send-image/:clientId', validateApiKey, async (req: Request, re
 
 /**
  * Crear nueva instancia de n8n
+ * 🔐 Requiere API Key y plan de pago (NO disponible para plan free)
  */
 router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
   try {
@@ -363,6 +364,34 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
 
     if (!user_id) {
       return res.status(400).json({ error: 'user_id is required' });
+    }
+
+    // ✅ Verificar que el usuario tenga un plan de pago (NO free)
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('plan_type, status_plan')
+      .eq('id', user_id)
+      .single();
+
+    if (profileError || !profile) {
+      return res.status(403).json({ 
+        error: 'Usuario no encontrado',
+        message: 'No se pudo verificar tu plan'
+      });
+    }
+
+    if (!profile.status_plan) {
+      return res.status(403).json({ 
+        error: 'Plan inactivo',
+        message: 'Tu plan no está activo. Por favor activa tu suscripción.'
+      });
+    }
+
+    if (profile.plan_type === 'free') {
+      return res.status(403).json({ 
+        error: 'Plan Free no permitido',
+        message: 'La creación de instancias N8N requiere un plan Pro o Business. Actualiza tu plan para acceder a esta funcionalidad.'
+      });
     }
 
     // Validar formato del nombre
