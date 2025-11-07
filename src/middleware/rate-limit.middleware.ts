@@ -133,3 +133,27 @@ export const suiteLimiter = rateLimit({
     });
   },
 });
+
+/**
+ * Rate limiter para endpoints de mensajes (GET)
+ * Más permisivo porque se usa con WebSockets como backup
+ * 500 requests por 15 minutos por IP
+ */
+export const messagesReadLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 500, // 500 requests
+  message: {
+    error: 'Límite de consultas de mensajes alcanzado, intenta en 15 minutos',
+    retryAfter: '15 minutos',
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: (req: Request, res: Response) => {
+    console.warn(`[Rate Limit] IP ${req.ip} excedió límite de consultas de mensajes`);
+    res.status(429).json({
+      error: 'Demasiadas consultas de mensajes, espera 15 minutos',
+      retryAfter: '15 minutos',
+      tip: 'Usa WebSockets/Realtime para actualizaciones en tiempo real',
+    });
+  },
+});

@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { messageService } from '../services/message.service';
+import { messagesReadLimiter, sendMessageLimiter } from '../middleware/rate-limit.middleware';
 
 const router = Router();
 
@@ -39,7 +40,7 @@ router.get('/:instanceId/:chatId', async (req: Request, res: Response) => {
  * POST /api/messages/send
  * Enviar mensaje de WhatsApp
  */
-router.post('/send', async (req: Request, res: Response) => {
+router.post('/send', sendMessageLimiter, async (req: Request, res: Response) => {
   try {
     const { instanceId, chatId, message } = req.body;
 
