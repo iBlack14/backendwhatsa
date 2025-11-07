@@ -366,10 +366,10 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'user_id is required' });
     }
 
-    // ✅ Verificar que el usuario tenga un plan de pago (NO free)
+    // ✅ Verificar plan del usuario y límites de Suite
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
-      .select('plan_type, status_plan')
+      .select('plan_type, status_plan, api_key')
       .eq('id', user_id)
       .single();
 
@@ -387,10 +387,41 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
       });
     }
 
-    if (profile.plan_type === 'free') {
+    // ✅ Verificar que tenga API key generada
+    if (!profile.api_key) {
       return res.status(403).json({ 
-        error: 'Plan Free no permitido',
-        message: 'La creación de instancias N8N requiere un plan Pro o Business. Actualiza tu plan para acceder a esta funcionalidad.'
+        error: 'API Key requerida',
+        message: 'Para crear instancias N8N debes generar tu API Key en tu perfil. Ve a Profile → API Key → Generar'
+      });
+    }
+
+    // ✅ Verificar límites de Suite según el plan
+    const { data: planLimits } = await supabase
+      .from('plan_limits')
+      .select('max_suites, can_use_suites')
+      .eq('plan_type', profile.plan_type)
+      .single();
+
+    if (!planLimits || !planLimits.can_use_suites) {
+      return res.status(403).json({ 
+        error: 'Suite no disponible',
+        message: 'Tu plan no tiene acceso a Suite/N8N.'
+      });
+    }
+
+    // ✅ Verificar cuántas Suites tiene actualmente
+    const { data: existingSuites, error: suitesError } = await supabase
+      .from('suites')
+      .select('id')
+      .eq('user_id', user_id)
+      .eq('activo', true);
+
+    const currentSuites = existingSuites?.length || 0;
+
+    if (currentSuites >= planLimits.max_suites) {
+      return res.status(403).json({ 
+        error: 'Límite de Suites alcanzado',
+        message: `Has alcanzado el límite de ${planLimits.max_suites} Suite(s) para tu plan ${profile.plan_type}. ${profile.plan_type === 'free' ? 'Actualiza a un plan superior para crear más instancias.' : 'Elimina una Suite existente o actualiza tu plan.'}`
       });
     }
 
