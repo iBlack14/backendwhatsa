@@ -373,14 +373,19 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
       .eq('id', user_id)
       .single();
 
+    console.log('[Suite] User profile:', { user_id, profile, profileError });
+
     if (profileError || !profile) {
+      console.error('[Suite] Profile not found:', profileError);
       return res.status(403).json({ 
         error: 'Usuario no encontrado',
-        message: 'No se pudo verificar tu plan'
+        message: 'No se pudo verificar tu plan',
+        details: profileError?.message
       });
     }
 
-    if (!profile.status_plan) {
+    // ⚠️ Permitir si status_plan es null (usuarios nuevos) o true
+    if (profile.status_plan === false) {
       return res.status(403).json({ 
         error: 'Plan inactivo',
         message: 'Tu plan no está activo. Por favor activa tu suscripción.'
@@ -396,16 +401,20 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
     }
 
     // ✅ Verificar límites de Suite según el plan
-    const { data: planLimits } = await supabase
+    const { data: planLimits, error: planLimitsError } = await supabase
       .from('plan_limits')
       .select('max_suites, can_use_suites')
       .eq('plan_type', profile.plan_type)
       .single();
 
+    console.log('[Suite] Plan limits:', { plan_type: profile.plan_type, planLimits, planLimitsError });
+
     if (!planLimits || !planLimits.can_use_suites) {
+      console.error('[Suite] Suite not available for plan:', profile.plan_type);
       return res.status(403).json({ 
         error: 'Suite no disponible',
-        message: 'Tu plan no tiene acceso a Suite/N8N.'
+        message: 'Tu plan no tiene acceso a Suite/N8N.',
+        details: planLimitsError?.message
       });
     }
 
@@ -418,7 +427,10 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
 
     const currentSuites = existingSuites?.length || 0;
 
+    console.log('[Suite] Current suites:', { currentSuites, max_suites: planLimits.max_suites });
+
     if (currentSuites >= planLimits.max_suites) {
+      console.error('[Suite] Suite limit reached:', { currentSuites, max_suites: planLimits.max_suites });
       return res.status(403).json({ 
         error: 'Límite de Suites alcanzado',
         message: `Has alcanzado el límite de ${planLimits.max_suites} Suite(s) para tu plan ${profile.plan_type}. ${profile.plan_type === 'free' ? 'Actualiza a un plan superior para crear más instancias.' : 'Elimina una Suite existente o actualiza tu plan.'}`
