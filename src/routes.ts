@@ -32,8 +32,9 @@ router.get('/health', (req: Request, res: Response) => {
   });
 });
 
+// ✅ Proteger TODAS las rutas con API key
 // Crear sesión
-router.post('/api/create-session', async (req: Request, res: Response) => {
+router.post('/api/create-session', validateApiKey, async (req: Request, res: Response) => {
   try {
     console.log('📥 Request body:', JSON.stringify(req.body, null, 2));
     
@@ -66,7 +67,7 @@ router.post('/api/create-session', async (req: Request, res: Response) => {
 });
 
 // Obtener QR
-router.get('/api/qr/:clientId', (req: Request, res: Response) => {
+router.get('/api/qr/:clientId', validateApiKey, (req: Request, res: Response) => {
   const { clientId } = req.params;
   const session = getSession(clientId);
 
@@ -83,7 +84,7 @@ router.get('/api/qr/:clientId', (req: Request, res: Response) => {
 });
 
 // Obtener todas las sesiones
-router.get('/api/sessions', (req: Request, res: Response) => {
+router.get('/api/sessions', validateApiKey, (req: Request, res: Response) => {
   const sessions = getAllSessions();
   
   const sessionsData = sessions.map(s => ({
@@ -102,7 +103,7 @@ router.get('/api/sessions', (req: Request, res: Response) => {
 });
 
 // Enviar mensaje
-router.post('/api/send-message', async (req: Request, res: Response) => {
+router.post('/api/send-message', validateApiKey, async (req: Request, res: Response) => {
   try {
     const { clientId, to, message } = req.body as SendMessageRequest;
 
@@ -125,7 +126,7 @@ router.post('/api/send-message', async (req: Request, res: Response) => {
 });
 
 // Desconectar sesión
-router.post('/api/disconnect/:clientId', async (req: Request, res: Response) => {
+router.post('/api/disconnect/:clientId', validateApiKey, async (req: Request, res: Response) => {
   try {
     const { clientId } = req.params;
     await disconnectSession(clientId);
@@ -141,7 +142,7 @@ router.post('/api/disconnect/:clientId', async (req: Request, res: Response) => 
 });
 
 // Desconectar sesión (ruta alternativa para compatibilidad)
-router.post('/api/disconnect-session/:documentId', async (req: Request, res: Response) => {
+router.post('/api/disconnect-session/:documentId', validateApiKey, async (req: Request, res: Response) => {
   try {
     const { documentId } = req.params;
     await disconnectSession(documentId);

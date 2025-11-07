@@ -1718,5 +1718,261 @@ ANALYZE public.rate_limits;
 ANALYZE public.rate_limits_ip;
 
 -- =====================================================
+-- 17. SISTEMA DE API KEYS Y SEGURIDAD
+-- =====================================================
+
+-- Asegurar que api_key sea único y no nulo
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'api_key_unique'
+  ) THEN
+    ALTER TABLE public.profiles ADD CONSTRAINT api_key_unique UNIQUE (api_key);
+  END IF;
+END $$;
+
+-- Función para generar API key única
+CREATE OR REPLACE FUNCTION generate_api_key()
+RETURNS TEXT AS $$
+DECLARE
+  v_api_key TEXT;
+  v_exists BOOLEAN;
+BEGIN
+  LOOP
+    -- Generar API key con formato: sk_live_{random_32_chars}
+    v_api_key := 'sk_live_' || encode(gen_random_bytes(24), 'hex');
+    
+    -- Verificar que no exista
+    SELECT EXISTS(
+      SELECT 1 FROM public.profiles WHERE api_key = v_api_key
+    ) INTO v_exists;
+    
+    EXIT WHEN NOT v_exists;
+  END LOOP;
+  
+  RETURN v_api_key;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger para generar API key automáticamente al crear perfil
+CREATE OR REPLACE FUNCTION auto_generate_api_key()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Si no tiene API key, generar una
+  IF NEW.api_key IS NULL OR NEW.api_key = '' THEN
+    NEW.api_key := generate_api_key();
+  END IF;
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trigger_auto_generate_api_key ON public.profiles;
+CREATE TRIGGER trigger_auto_generate_api_key
+  BEFORE INSERT OR UPDATE ON public.profiles
+  FOR EACH ROW
+  EXECUTE FUNCTION auto_generate_api_key();
+
+-- Tabla de tracking de uso de API keys
+CREATE TABLE IF NOT EXISTS public.api_key_usage (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  api_key TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  method TEXT NOT NULL,
+  ip_address TEXT,
+  user_agent TEXT,
+  status_code INTEGER,
+  response_time_ms INTEGER,
+  timestamp TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Índices para performance
+CREATE INDEX IF NOT EXISTS idx_api_key_usage_user_id ON public.api_key_usage(user_id);
+CREATE INDEX IF NOT EXISTS idx_api_key_usage_timestamp ON public.api_key_usage(timestamp);
+CREATE INDEX IF NOT EXISTS idx_api_key_usage_api_key ON public.api_key_usage(api_key);
+
+-- Tabla de historial de API keys (para rotación)
+CREATE TABLE IF NOT EXISTS public.api_key_history (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  old_api_key TEXT NOT NULL,
+  new_api_key TEXT NOT NULL,
+  reason TEXT,
+  revoked_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- RLS para api_key_usage
+ALTER TABLE public.api_key_usage ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view own API usage" ON public.api_key_usage;
+CREATE POLICY "Users can view own API usage"
+  ON public.api_key_usage FOR SELECT
+  USING (auth.uid() = user_id);
+
+-- RLS para api_key_history
+ALTER TABLE public.api_key_history ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view own API key history" ON public.api_key_history;
+CREATE POLICY "Users can view own API key history"
+  ON public.api_key_history FOR SELECT
+  USING (auth.uid() = user_id);
+
+-- Función para regenerar API key
+CREATE OR REPLACE FUNCTION regenerate_api_key(
+  p_user_id UUID,
+  p_reason TEXT DEFAULT 'User requested'
+)
+RETURNS TABLE (
+  new_api_key TEXT,
+  success BOOLEAN
+) AS $$
+DECLARE
+  v_old_api_key TEXT;
+  v_new_api_key TEXT;
+BEGIN
+  -- Obtener API key actual
+  SELECT api_key INTO v_old_api_key
+  FROM public.profiles
+  WHERE id = p_user_id;
+  
+  IF NOT FOUND THEN
+    RETURN QUERY SELECT NULL::TEXT, false;
+    RETURN;
+  END IF;
+  
+  -- Generar nueva API key
+  v_new_api_key := generate_api_key();
+  
+  -- Actualizar perfil
+  UPDATE public.profiles
+  SET api_key = v_new_api_key
+  WHERE id = p_user_id;
+  
+  -- Guardar en historial
+  INSERT INTO public.api_key_history (user_id, old_api_key, new_api_key, reason)
+  VALUES (p_user_id, v_old_api_key, v_new_api_key, p_reason);
+  
+  RETURN QUERY SELECT v_new_api_key, true;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Función para registrar uso de API
+CREATE OR REPLACE FUNCTION log_api_usage(
+  p_user_id UUID,
+  p_api_key TEXT,
+  p_endpoint TEXT,
+  p_method TEXT,
+  p_ip_address TEXT DEFAULT NULL,
+  p_user_agent TEXT DEFAULT NULL,
+  p_status_code INTEGER DEFAULT 200,
+  p_response_time_ms INTEGER DEFAULT NULL
+)
+RETURNS void AS $$
+BEGIN
+  INSERT INTO public.api_key_usage (
+    user_id,
+    api_key,
+    endpoint,
+    method,
+    ip_address,
+    user_agent,
+    status_code,
+    response_time_ms
+  ) VALUES (
+    p_user_id,
+    p_api_key,
+    p_endpoint,
+    p_method,
+    p_ip_address,
+    p_user_agent,
+    p_status_code,
+    p_response_time_ms
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Función para obtener estadísticas de uso de API
+CREATE OR REPLACE FUNCTION get_api_usage_stats(
+  p_user_id UUID,
+  p_days INTEGER DEFAULT 7
+)
+RETURNS TABLE (
+  total_requests BIGINT,
+  successful_requests BIGINT,
+  failed_requests BIGINT,
+  avg_response_time_ms NUMERIC,
+  most_used_endpoint TEXT,
+  requests_by_day JSONB
+) AS $$
+BEGIN
+  RETURN QUERY
+  WITH stats AS (
+    SELECT
+      COUNT(*) as total,
+      COUNT(*) FILTER (WHERE status_code < 400) as success,
+      COUNT(*) FILTER (WHERE status_code >= 400) as failed,
+      AVG(response_time_ms) as avg_time
+    FROM public.api_key_usage
+    WHERE user_id = p_user_id
+      AND timestamp > NOW() - (p_days || ' days')::INTERVAL
+  ),
+  top_endpoint AS (
+    SELECT endpoint
+    FROM public.api_key_usage
+    WHERE user_id = p_user_id
+      AND timestamp > NOW() - (p_days || ' days')::INTERVAL
+    GROUP BY endpoint
+    ORDER BY COUNT(*) DESC
+    LIMIT 1
+  ),
+  daily_stats AS (
+    SELECT jsonb_object_agg(
+      date_trunc('day', timestamp)::DATE,
+      count
+    ) as by_day
+    FROM (
+      SELECT
+        date_trunc('day', timestamp) as day,
+        COUNT(*) as count
+      FROM public.api_key_usage
+      WHERE user_id = p_user_id
+        AND timestamp > NOW() - (p_days || ' days')::INTERVAL
+      GROUP BY date_trunc('day', timestamp)
+      ORDER BY day DESC
+    ) daily
+  )
+  SELECT
+    COALESCE(stats.total, 0),
+    COALESCE(stats.success, 0),
+    COALESCE(stats.failed, 0),
+    ROUND(COALESCE(stats.avg_time, 0)::NUMERIC, 2),
+    COALESCE(top_endpoint.endpoint, 'N/A'),
+    COALESCE(daily_stats.by_day, '{}'::JSONB)
+  FROM stats
+  LEFT JOIN top_endpoint ON true
+  LEFT JOIN daily_stats ON true;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Generar API keys para usuarios existentes que no tengan
+UPDATE public.profiles
+SET api_key = generate_api_key()
+WHERE api_key IS NULL OR api_key = '';
+
+-- Comentarios
+COMMENT ON FUNCTION generate_api_key IS 'Genera una API key única con formato sk_live_{random}';
+COMMENT ON FUNCTION regenerate_api_key IS 'Regenera la API key de un usuario y guarda en historial';
+COMMENT ON FUNCTION log_api_usage IS 'Registra el uso de la API para tracking y analytics';
+COMMENT ON FUNCTION get_api_usage_stats IS 'Obtiene estadísticas de uso de API de un usuario';
+COMMENT ON TABLE public.api_key_usage IS 'Tracking de todas las llamadas a la API';
+COMMENT ON TABLE public.api_key_history IS 'Historial de rotación de API keys';
+
+ANALYZE public.api_key_usage;
+ANALYZE public.api_key_history;
+
+-- =====================================================
 -- FIN DEL SCHEMA
 -- =====================================================

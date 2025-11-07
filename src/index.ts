@@ -11,11 +11,30 @@ dotenv.config();
 const app = express();
 const PORT = Number(process.env.PORT) || 4000;
 
-// Middlewares
+// ✅ CORS restrictivo - Solo permitir frontend autorizado
+const allowedOrigins = [
+  process.env.FRONTEND_URL || 'http://localhost:3000',
+  'http://localhost:3000', // Desarrollo
+  'http://localhost:3001', // Desarrollo alternativo
+];
+
 app.use(cors({
-  origin: process.env.FRONTEND_URL || process.env.ALLOWED_ORIGINS?.split(',') || 'http://localhost:3000',
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  origin: function (origin, callback) {
+    // Permitir requests sin origin (como Postman) solo en desarrollo
+    if (!origin && process.env.NODE_ENV === 'development') {
+      return callback(null, true);
+    }
+    
+    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.warn(`[CORS] ❌ Blocked request from unauthorized origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 
 app.use(express.json());
