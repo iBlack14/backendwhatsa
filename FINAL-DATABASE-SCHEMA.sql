@@ -1173,5 +1173,225 @@ ANALYZE public.plan_limits;
 ANALYZE public.daily_usage;
 
 -- =====================================================
+-- 14. SISTEMA DE CHATBOTS
+-- =====================================================
+
+-- Tabla de chatbots
+CREATE TABLE IF NOT EXISTS public.chatbots (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL,
+  instance_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  welcome_message TEXT,
+  default_response TEXT NOT NULL DEFAULT 'Lo siento, no entendí tu mensaje.',
+  rules JSONB NOT NULL DEFAULT '[]'::jsonb,
+  is_active BOOLEAN DEFAULT true,
+  total_conversations INTEGER DEFAULT 0,
+  total_responses INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT chatbots_user_id_fkey FOREIGN KEY (user_id) 
+    REFERENCES auth.users(id) ON DELETE CASCADE,
+  CONSTRAINT chatbots_instance_id_fkey FOREIGN KEY (instance_id) 
+    REFERENCES public.instances(document_id) ON DELETE CASCADE,
+  UNIQUE(instance_id)  -- Una instancia solo puede tener un chatbot activo
+);
+
+-- Tabla de logs de chatbot (opcional, para analytics)
+CREATE TABLE IF NOT EXISTS public.chatbot_logs (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  chatbot_id UUID NOT NULL,
+  user_phone TEXT NOT NULL,
+  user_message TEXT NOT NULL,
+  bot_response TEXT NOT NULL,
+  rule_matched TEXT,
+  timestamp TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT chatbot_logs_chatbot_id_fkey FOREIGN KEY (chatbot_id) 
+    REFERENCES public.chatbots(id) ON DELETE CASCADE
+);
+
+-- Índices para chatbots
+CREATE INDEX IF NOT EXISTS idx_chatbots_user_id ON public.chatbots(user_id);
+CREATE INDEX IF NOT EXISTS idx_chatbots_instance_id ON public.chatbots(instance_id);
+CREATE INDEX IF NOT EXISTS idx_chatbots_is_active ON public.chatbots(is_active) WHERE is_active = true;
+
+-- Índices para logs
+CREATE INDEX IF NOT EXISTS idx_chatbot_logs_chatbot_id ON public.chatbot_logs(chatbot_id);
+CREATE INDEX IF NOT EXISTS idx_chatbot_logs_timestamp ON public.chatbot_logs(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_chatbot_logs_user_phone ON public.chatbot_logs(user_phone);
+
+-- RLS para chatbots
+ALTER TABLE public.chatbots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.chatbot_logs ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view own chatbots" ON public.chatbots;
+CREATE POLICY "Users can view own chatbots"
+  ON public.chatbots FOR SELECT
+  USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can manage own chatbots" ON public.chatbots;
+CREATE POLICY "Users can manage own chatbots"
+  ON public.chatbots FOR ALL
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can view own chatbot logs" ON public.chatbot_logs;
+CREATE POLICY "Users can view own chatbot logs"
+  ON public.chatbot_logs FOR SELECT
+  USING (
+    chatbot_id IN (
+      SELECT id FROM public.chatbots WHERE user_id = auth.uid()
+    )
+  );
+
+-- Trigger para updated_at
+DROP TRIGGER IF EXISTS update_chatbots_updated_at ON public.chatbots;
+CREATE TRIGGER update_chatbots_updated_at 
+  BEFORE UPDATE ON public.chatbots
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Función para registrar interacción del chatbot
+CREATE OR REPLACE FUNCTION log_chatbot_interaction(
+  p_chatbot_id UUID,
+  p_user_phone TEXT,
+  p_user_message TEXT,
+  p_bot_response TEXT,
+  p_rule_matched TEXT DEFAULT NULL
+)
+RETURNS VOID AS $$
+BEGIN
+  -- Insertar log
+  INSERT INTO public.chatbot_logs (
+    chatbot_id,
+    user_phone,
+    user_message,
+    bot_response,
+    rule_matched
+  ) VALUES (
+    p_chatbot_id,
+    p_user_phone,
+    p_user_message,
+    p_bot_response,
+    p_rule_matched
+  );
+  
+  -- Actualizar contadores del chatbot
+  UPDATE public.chatbots
+  SET 
+    total_responses = total_responses + 1,
+    updated_at = NOW()
+  WHERE id = p_chatbot_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Vista de estadísticas de chatbots
+CREATE OR REPLACE VIEW public.chatbot_stats AS
+SELECT 
+  c.id,
+  c.name,
+  c.instance_id,
+  c.is_active,
+  c.total_conversations,
+  c.total_responses,
+  COUNT(DISTINCT cl.user_phone) as unique_users,
+  COUNT(cl.id) as total_interactions,
+  c.created_at,
+  c.updated_at
+FROM public.chatbots c
+LEFT JOIN public.chatbot_logs cl ON c.id = cl.chatbot_id
+GROUP BY c.id, c.name, c.instance_id, c.is_active, c.total_conversations, c.total_responses, c.created_at, c.updated_at;
+
+-- Comentarios
+COMMENT ON TABLE public.chatbots IS 'Configuración de chatbots por instancia';
+COMMENT ON TABLE public.chatbot_logs IS 'Logs de interacciones con chatbots para analytics';
+COMMENT ON COLUMN public.chatbots.rules IS 'Array JSON de reglas: [{"trigger": "hola", "response": "Hola!", "isActive": true}]';
+COMMENT ON FUNCTION log_chatbot_interaction IS 'Registra una interacción del chatbot y actualiza contadores';
+
+ANALYZE public.chatbots;
+ANALYZE public.chatbot_logs;
+
+-- =====================================================
+-- 15. GESTIÓN DE TEMPLATES POR INSTANCIA
+-- =====================================================
+
+-- Agregar columnas de template management a instances si no existen
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'instances' 
+    AND column_name = 'active_template'
+  ) THEN
+    ALTER TABLE public.instances ADD COLUMN active_template TEXT DEFAULT 'none' CHECK (active_template IN ('none', 'spam', 'chatbot'));
+  END IF;
+  
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'instances' 
+    AND column_name = 'template_config'
+  ) THEN
+    ALTER TABLE public.instances ADD COLUMN template_config JSONB DEFAULT '{}'::jsonb;
+  END IF;
+  
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'instances' 
+    AND column_name = 'template_updated_at'
+  ) THEN
+    ALTER TABLE public.instances ADD COLUMN template_updated_at TIMESTAMPTZ;
+  END IF;
+END $$;
+
+-- Índice para búsqueda por template activo
+CREATE INDEX IF NOT EXISTS idx_instances_active_template ON public.instances(active_template) WHERE active_template != 'none';
+
+-- Vista de uso de recursos por usuario
+CREATE OR REPLACE VIEW public.user_template_resources AS
+SELECT 
+  i.user_id,
+  COUNT(*) as total_instances,
+  COUNT(*) FILTER (WHERE i.active_template = 'spam') as spam_instances,
+  COUNT(*) FILTER (WHERE i.active_template = 'chatbot') as chatbot_instances,
+  COUNT(*) FILTER (WHERE i.active_template = 'none') as inactive_instances,
+  -- Estimación de recursos (valores aproximados)
+  SUM(CASE 
+    WHEN i.active_template = 'spam' THEN 30 + 50 + 80  -- CPU + Memory + Bandwidth
+    WHEN i.active_template = 'chatbot' THEN 20 + 40 + 30
+    ELSE 0
+  END) as total_resource_usage
+FROM public.instances i
+GROUP BY i.user_id;
+
+-- Función para obtener template activo de una instancia
+CREATE OR REPLACE FUNCTION get_instance_template(p_instance_id TEXT)
+RETURNS TABLE (
+  template_type TEXT,
+  is_active BOOLEAN,
+  config JSONB
+) AS $$
+BEGIN
+  RETURN QUERY
+  SELECT 
+    i.active_template,
+    CASE 
+      WHEN i.active_template = 'chatbot' THEN 
+        (SELECT c.is_active FROM public.chatbots c WHERE c.instance_id = p_instance_id LIMIT 1)
+      ELSE true
+    END as is_active,
+    i.template_config
+  FROM public.instances i
+  WHERE i.document_id = p_instance_id;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Comentarios
+COMMENT ON COLUMN public.instances.active_template IS 'Template activo: none, spam, chatbot';
+COMMENT ON COLUMN public.instances.template_config IS 'Configuración específica del template activo';
+COMMENT ON VIEW public.user_template_resources IS 'Resumen de uso de recursos por templates del usuario';
+
+-- =====================================================
 -- FIN DEL SCHEMA
 -- =====================================================
