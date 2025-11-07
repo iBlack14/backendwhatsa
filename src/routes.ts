@@ -158,7 +158,7 @@ router.post('/api/disconnect-session/:documentId', validateApiKey, async (req: R
 });
 
 // Generar QR para sesión existente
-router.post('/api/generate-qr', async (req: Request, res: Response) => {
+router.post('/api/generate-qr', validateApiKey, async (req: Request, res: Response) => {
   try {
     const { clientId } = req.body;
 
