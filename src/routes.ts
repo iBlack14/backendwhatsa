@@ -32,9 +32,9 @@ router.get('/health', (req: Request, res: Response) => {
   });
 });
 
-// ✅ Proteger TODAS las rutas con API key
+// ✅ Rutas básicas que NO requieren API key
 // Crear sesión
-router.post('/api/create-session', validateApiKey, async (req: Request, res: Response) => {
+router.post('/api/create-session', async (req: Request, res: Response) => {
   try {
     console.log('📥 Request body:', JSON.stringify(req.body, null, 2));
     
@@ -84,7 +84,7 @@ router.get('/api/qr/:clientId', validateApiKey, (req: Request, res: Response) =>
 });
 
 // Obtener todas las sesiones
-router.get('/api/sessions', validateApiKey, (req: Request, res: Response) => {
+router.get('/api/sessions', async (req: Request, res: Response) => {
   const sessions = getAllSessions();
   
   const sessionsData = sessions.map(s => ({
@@ -102,8 +102,47 @@ router.get('/api/sessions', validateApiKey, (req: Request, res: Response) => {
   });
 });
 
+// Obtener perfil de WhatsApp
+router.get('/api/profile/:documentId', async (req: Request, res: Response) => {
+  const { documentId } = req.params;
+  const session = getSession(documentId);
+
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
+
+  if (session.state !== 'Connected') {
+    return res.status(400).json({ 
+      error: 'Session not connected',
+      state: session.state 
+    });
+  }
+
+  res.json({
+    name: session.profileName || 'Unknown',
+    profilePicUrl: session.profilePicUrl || null,
+    number: session.phoneNumber || null,
+  });
+});
+
+// Actualizar webhook (para compatibilidad con N8N)
+router.post('/api/update-webhook/:clientId', async (req: Request, res: Response) => {
+  const { clientId } = req.params;
+  const { webhook_url } = req.body;
+
+  console.log(`📝 Webhook updated for ${clientId}:`, webhook_url);
+
+  res.json({
+    success: true,
+    message: 'Webhook updated successfully',
+  });
+});
+
+// Rutas que requieren API key
+router.use(validateApiKey);
+
 // Enviar mensaje
-router.post('/api/send-message', validateApiKey, async (req: Request, res: Response) => {
+router.post('/api/send-message', async (req: Request, res: Response) => {
   try {
     const { clientId, to, message } = req.body as SendMessageRequest;
 
@@ -126,7 +165,7 @@ router.post('/api/send-message', validateApiKey, async (req: Request, res: Respo
 });
 
 // Desconectar sesión
-router.post('/api/disconnect/:clientId', validateApiKey, async (req: Request, res: Response) => {
+router.post('/api/disconnect/:clientId', async (req: Request, res: Response) => {
   try {
     const { clientId } = req.params;
     await disconnectSession(clientId);
@@ -142,7 +181,7 @@ router.post('/api/disconnect/:clientId', validateApiKey, async (req: Request, re
 });
 
 // Desconectar sesión (ruta alternativa para compatibilidad)
-router.post('/api/disconnect-session/:documentId', validateApiKey, async (req: Request, res: Response) => {
+router.post('/api/disconnect-session/:documentId', async (req: Request, res: Response) => {
   try {
     const { documentId } = req.params;
     await disconnectSession(documentId);
@@ -158,7 +197,7 @@ router.post('/api/disconnect-session/:documentId', validateApiKey, async (req: R
 });
 
 // Generar QR para sesión existente
-router.post('/api/generate-qr', validateApiKey, async (req: Request, res: Response) => {
+router.post('/api/generate-qr', async (req: Request, res: Response) => {
   try {
     const { clientId } = req.body;
 
