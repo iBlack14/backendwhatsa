@@ -138,7 +138,11 @@ router.post('/api/update-webhook/:clientId', async (req: Request, res: Response)
   });
 });
 
-// Rutas que requieren API key
+// ✅ Montar rutas de mensajes y chats ANTES del middleware de API key
+// Estas rutas son gratuitas y no requieren API key
+router.use('/api/messages', messagesRouter);
+
+// Rutas que requieren API key (solo para funciones avanzadas)
 router.use(validateApiKey);
 
 // Enviar mensaje
@@ -622,8 +626,5 @@ router.use('/api', plansRouter);
 
 // Montar rutas de proxies
 router.use('/api/proxies', proxiesRouter);
-
-// Montar rutas de mensajes y chats
-router.use('/api/messages', messagesRouter);
 
 export default router;
