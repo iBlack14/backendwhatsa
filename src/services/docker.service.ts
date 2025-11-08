@@ -49,7 +49,7 @@ export class DockerService {
    */
   async createN8nInstance(params: CreateN8nInstanceParams) {
     this.checkDockerAvailable();
-    const { serviceName, userId, memory = '256m', cpu = 256 } = params;
+    const { serviceName, userId, memory = '512m', cpu = 512 } = params;
 
     try {
       console.log(`[Docker] Creating n8n instance: ${serviceName}`);
@@ -66,6 +66,14 @@ export class DockerService {
           // No usar autenticación básica - dejar que N8N maneje el setup
           'N8N_BASIC_AUTH_ACTIVE=false',
           `WEBHOOK_URL=https://${serviceName}.${BASE_DOMAIN}`,
+          // Configuración para estabilidad
+          'N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true',
+          'DB_SQLITE_POOL_SIZE=3',
+          'EXECUTIONS_DATA_PRUNE=true',
+          'EXECUTIONS_DATA_MAX_AGE=168',
+          // Configuración de seguridad
+          'N8N_BLOCK_ENV_ACCESS_IN_NODE=false',
+          'N8N_GIT_NODE_DISABLE_BARE_REPOS=true',
         ],
         Labels: {
           // Labels de Traefik para que el proxy inverso encuentre el contenedor
