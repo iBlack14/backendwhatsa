@@ -53,6 +53,7 @@ export class DockerService {
 
     try {
       console.log(`[Docker] Creating n8n instance: ${serviceName}`);
+      console.log(`[Docker] N8N_ENCRYPTION_KEY from env:`, process.env.N8N_ENCRYPTION_KEY ? 'FOUND' : 'NOT FOUND');
 
       // Configuración del contenedor
       const containerConfig: Docker.ContainerCreateOptions = {
