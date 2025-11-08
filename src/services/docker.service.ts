@@ -90,10 +90,13 @@ export class DockerService {
           Binds: [
             `${serviceName}-data:/home/node/.n8n`,
           ],
-          // Siempre usar la red de Easypanel en producción
-          NetworkMode: NETWORK_NAME,
           PortBindings: {
             '5678/tcp': [{ HostPort: '0' }] // Puerto aleatorio en desarrollo
+          }
+        },
+        NetworkingConfig: {
+          EndpointsConfig: {
+            [NETWORK_NAME]: {}
           }
         },
         ExposedPorts: {
@@ -110,31 +113,31 @@ export class DockerService {
       // Iniciar contenedor
       await container.start();
 
-      // Conectar a las redes necesarias para Traefik
-      const networks = [NETWORK_NAME, 'easypanel-blxk'];
-      for (const networkName of networks) {
-        try {
-          const network = docker.getNetwork(networkName);
-          await network.connect({
-            Container: container.id,
-          });
-          console.log(`[Docker] ✅ Connected to network: ${networkName}`);
-        } catch (netError: any) {
-          if (netError.statusCode === 409 || netError.statusCode === 403) {
-            console.log(`[Docker] ℹ️ Already connected to network: ${networkName}`);
-          } else {
-            console.warn(`[Docker] ⚠️ Could not connect to network ${networkName}:`, netError.message);
-          }
+      // Conectar a la red adicional de Easypanel (la red principal ya está conectada en NetworkingConfig)
+      const additionalNetwork = 'easypanel-blxk';
+      try {
+        const network = docker.getNetwork(additionalNetwork);
+        await network.connect({
+          Container: container.id,
+        });
+        console.log(`[Docker] ✅ Connected to network: ${additionalNetwork}`);
+      } catch (netError: any) {
+        if (netError.statusCode === 409 || netError.statusCode === 403) {
+          console.log(`[Docker] ℹ️ Already connected to network: ${additionalNetwork}`);
+        } else {
+          console.warn(`[Docker] ⚠️ Could not connect to network ${additionalNetwork}:`, netError.message);
         }
       }
 
       // Obtener información del contenedor para el puerto
       const containerInfo = await container.inspect();
       const port = containerInfo.NetworkSettings.Ports?.['5678/tcp']?.[0]?.HostPort || '5678';
+      const networkIP = containerInfo.NetworkSettings.Networks?.[NETWORK_NAME]?.IPAddress || 'unknown';
 
       console.log(`[Docker] ✅ Instance created and started: ${serviceName}`);
       console.log(`[Docker] 📍 Port: ${port}`);
       console.log(`[Docker] 🌐 URL: https://${serviceName}.${BASE_DOMAIN}`);
+      console.log(`[Docker] 🔗 Network IP (${NETWORK_NAME}): ${networkIP}`);
 
       // En desarrollo, usar localhost con puerto
       const isDev = process.env.NODE_ENV !== 'production';
