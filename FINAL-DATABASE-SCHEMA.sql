@@ -27,10 +27,34 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   plan_expires_at TIMESTAMPTZ,
   created_by_google BOOLEAN DEFAULT false,
   api_key TEXT,
+  must_change_password BOOLEAN DEFAULT false,
+  temp_password TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT profiles_id_fkey FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE
 );
+
+-- Agregar columnas si no existen (para BD existentes)
+DO $$ 
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'profiles' 
+    AND column_name = 'must_change_password'
+  ) THEN
+    ALTER TABLE public.profiles ADD COLUMN must_change_password BOOLEAN DEFAULT false;
+  END IF;
+  
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'profiles' 
+    AND column_name = 'temp_password'
+  ) THEN
+    ALTER TABLE public.profiles ADD COLUMN temp_password TEXT;
+  END IF;
+END $$;
 
 -- Tabla de instancias de WhatsApp
 CREATE TABLE IF NOT EXISTS public.instances (
@@ -869,6 +893,7 @@ ORDER BY m.timestamp DESC;
 -- =====================================================
 
 -- Función para obtener proxy disponible del usuario
+DROP FUNCTION IF EXISTS get_available_proxy(UUID);
 CREATE OR REPLACE FUNCTION get_available_proxy(p_user_id UUID DEFAULT NULL)
 RETURNS TABLE (
   id UUID,
@@ -1382,6 +1407,7 @@ FROM public.instances i
 GROUP BY i.user_id;
 
 -- Función para obtener template activo de una instancia
+DROP FUNCTION IF EXISTS get_instance_template(TEXT);
 CREATE OR REPLACE FUNCTION get_instance_template(p_instance_id TEXT)
 RETURNS TABLE (
   template_type TEXT,
@@ -1499,6 +1525,7 @@ CREATE TRIGGER update_anti_ban_counters_updated_at
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- Función para obtener/crear contador anti-ban
+DROP FUNCTION IF EXISTS get_or_create_anti_ban_counter(TEXT, UUID);
 CREATE OR REPLACE FUNCTION get_or_create_anti_ban_counter(
   p_instance_id TEXT,
   p_user_id UUID
@@ -1847,6 +1874,7 @@ CREATE POLICY "Users can view own API key history"
   USING (auth.uid() = user_id);
 
 -- Función para regenerar API key
+DROP FUNCTION IF EXISTS regenerate_api_key(UUID, TEXT);
 CREATE OR REPLACE FUNCTION regenerate_api_key(
   p_user_id UUID,
   p_reason TEXT DEFAULT 'User requested'
@@ -1921,6 +1949,7 @@ END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Función para obtener estadísticas de uso de API
+DROP FUNCTION IF EXISTS get_api_usage_stats(UUID, INTEGER);
 CREATE OR REPLACE FUNCTION get_api_usage_stats(
   p_user_id UUID,
   p_days INTEGER DEFAULT 7
@@ -1998,6 +2027,64 @@ COMMENT ON TABLE public.api_key_history IS 'Historial de rotación de API keys';
 
 ANALYZE public.api_key_usage;
 ANALYZE public.api_key_history;
+
+-- =====================================================
+-- TABLA DE PAGOS (IZIPAY)
+-- =====================================================
+
+-- Crear tabla de pagos
+CREATE TABLE IF NOT EXISTS public.payments (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID NOT NULL,
+  order_id TEXT NOT NULL UNIQUE,
+  transaction_id TEXT,
+  amount NUMERIC NOT NULL,
+  currency TEXT DEFAULT 'PEN',
+  status TEXT NOT NULL CHECK (status IN ('pending', 'paid', 'failed', 'refunded')),
+  payment_method TEXT,
+  plan_type TEXT,
+  plan_name TEXT,
+  customer_email TEXT,
+  izipay_response JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT payments_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE
+);
+
+-- Índices para rendimiento
+CREATE INDEX IF NOT EXISTS idx_payments_user_id ON public.payments(user_id);
+CREATE INDEX IF NOT EXISTS idx_payments_order_id ON public.payments(order_id);
+CREATE INDEX IF NOT EXISTS idx_payments_status ON public.payments(status);
+CREATE INDEX IF NOT EXISTS idx_payments_created_at ON public.payments(created_at DESC);
+
+-- Trigger para updated_at
+DROP TRIGGER IF EXISTS update_payments_updated_at ON public.payments;
+CREATE TRIGGER update_payments_updated_at 
+  BEFORE UPDATE ON public.payments
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Habilitar RLS
+ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
+
+-- Políticas RLS
+DROP POLICY IF EXISTS "Users can view own payments" ON public.payments;
+CREATE POLICY "Users can view own payments" 
+  ON public.payments FOR SELECT 
+  USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can insert own payments" ON public.payments;
+CREATE POLICY "Users can insert own payments" 
+  ON public.payments FOR INSERT 
+  WITH CHECK (auth.uid() = user_id);
+
+-- Comentarios
+COMMENT ON TABLE public.payments IS 'Registro de pagos realizados por los usuarios';
+COMMENT ON COLUMN public.payments.order_id IS 'ID único de la orden de pago';
+COMMENT ON COLUMN public.payments.transaction_id IS 'ID de transacción de Izipay';
+COMMENT ON COLUMN public.payments.status IS 'Estado del pago: pending, paid, failed, refunded';
+COMMENT ON COLUMN public.payments.izipay_response IS 'Respuesta completa de Izipay en formato JSON';
+
+ANALYZE public.payments;
 
 -- =====================================================
 -- FIN DEL SCHEMA
