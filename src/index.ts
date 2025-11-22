@@ -1,12 +1,10 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import routes from './routes';
 import { restoreAllSessions } from './whatsapp';
 import { generalLimiter } from './middleware/rate-limit.middleware';
 import logger, { loggers } from './utils/logger';
-
-dotenv.config();
 
 const app = express();
 const PORT = Number(process.env.PORT) || 4000;
@@ -24,7 +22,7 @@ app.use(cors({
     if (!origin && process.env.NODE_ENV === 'development') {
       return callback(null, true);
     }
-    
+
     if (!origin || allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
@@ -64,13 +62,13 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 // Start server
 app.listen(PORT, '0.0.0.0', async () => {
   const host = process.env.HOST || 'localhost';
-  
+
   logger.info('🚀 WhatsApp Backend Server started');
   logger.info(`🌐 Running on: http://0.0.0.0:${PORT}`);
   logger.info(`🌐 Local: http://localhost:${PORT}`);
   logger.info(`🌐 Network: http://${host}:${PORT}`);
   logger.info(`✅ Health check: http://${host}:${PORT}/health`);
-  
+
   logger.info('📋 Available endpoints:');
   logger.info('   POST   /api/create-session');
   logger.info('   POST   /api/generate-qr');
@@ -83,7 +81,7 @@ app.listen(PORT, '0.0.0.0', async () => {
   logger.info('   POST   /api/disconnect/:clientId');
   logger.info('   POST   /api/disconnect-session/:documentId');
   logger.info('   POST   /api/update-webhook/:clientId');
-  
+
   // Restaurar sesiones existentes
   logger.info('🔄 Restoring WhatsApp Sessions...');
   try {
