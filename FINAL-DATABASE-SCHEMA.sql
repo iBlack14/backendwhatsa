@@ -75,7 +75,7 @@ ALTER TABLE public.whatsapp_sessions ENABLE ROW LEVEL SECURITY;
 -- Políticas para whatsapp_sessions (Servicio puede todo, usuarios nada por defecto o ajustar según necesidad)
 -- Asumiendo que el backend usa service_role, no necesita políticas permisivas para anon/authenticated si no acceden directo.
 -- Pero si se quiere que el usuario dueño de la instancia pueda ver (aunque no es usual para sesiones internas):
--- CREATE POLICY "Service role manages sessions" ON public.whatsapp_sessions USING (true) WITH CHECK (true);
+-- CREATE POLICY "Service role manages A" ON public.whatsapp_sessions USING (true) WITH CHECK (true);
 
 -- Trigger para updated_at
 DROP TRIGGER IF EXISTS update_whatsapp_sessions_updated_at ON public.whatsapp_sessions;

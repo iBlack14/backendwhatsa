@@ -102,20 +102,63 @@ export const useSupabaseAuthState = async (sessionId: string): Promise<{ state: 
                     return data;
                 },
                 set: async (data) => {
-                    const tasks: Promise<void>[] = [];
+                    const updates: any[] = [];
+                    const deletions: string[] = [];
+
                     for (const category in data) {
                         const cat = category as keyof SignalDataTypeMap;
                         for (const id in data[cat]) {
                             const key = `${cat}-${id}`;
                             const value = data[cat]?.[id];
                             if (value) {
-                                tasks.push(writeData(key, value));
+                                const jsonValue = JSON.parse(JSON.stringify(value, BufferJSON.replacer));
+                                updates.push({
+                                    session_id: sessionId,
+                                    key: key,
+                                    value: jsonValue,
+                                    updated_at: new Date().toISOString()
+                                });
                             } else {
-                                tasks.push(removeData(key));
+                                deletions.push(key);
                             }
                         }
                     }
-                    await Promise.all(tasks);
+
+                    // Batch updates (Supabase supports bulk upsert)
+                    if (updates.length > 0) {
+                        // Process in chunks of 50 to avoid payload limits or timeouts
+                        const chunkSize = 50;
+                        for (let i = 0; i < updates.length; i += chunkSize) {
+                            const chunk = updates.slice(i, i + chunkSize);
+                            try {
+                                const { error } = await supabase
+                                    .from(tableName)
+                                    .upsert(chunk, { onConflict: 'session_id,key' });
+
+                                if (error) console.error('Error batch saving session data:', error);
+                            } catch (err) {
+                                console.error('Error batch saving session data (exception):', err);
+                            }
+                        }
+                    }
+
+                    // Batch deletions
+                    if (deletions.length > 0) {
+                        // Process in chunks of 50
+                        const chunkSize = 50;
+                        for (let i = 0; i < deletions.length; i += chunkSize) {
+                            const chunk = deletions.slice(i, i + chunkSize);
+                            try {
+                                await supabase
+                                    .from(tableName)
+                                    .delete()
+                                    .eq('session_id', sessionId)
+                                    .in('key', chunk);
+                            } catch (err) {
+                                console.error('Error batch deleting session data:', err);
+                            }
+                        }
+                    }
                 },
             },
         },
