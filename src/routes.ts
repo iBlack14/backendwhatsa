@@ -25,8 +25,8 @@ const supabase = createClient(
 
 // Health check
 router.get('/health', (req: Request, res: Response) => {
-  res.json({ 
-    status: 'ok', 
+  res.json({
+    status: 'ok',
     message: 'WhatsApp Backend is running',
     timestamp: new Date().toISOString()
   });
@@ -37,7 +37,7 @@ router.get('/health', (req: Request, res: Response) => {
 router.post('/api/create-session', async (req: Request, res: Response) => {
   try {
     console.log('📥 Request body:', JSON.stringify(req.body, null, 2));
-    
+
     let { clientId } = req.body as CreateSessionRequest;
 
     // Limpiar el = del inicio si existe (bug de N8N)
@@ -86,7 +86,7 @@ router.get('/api/qr/:clientId', validateApiKey, (req: Request, res: Response) =>
 // Obtener todas las sesiones
 router.get('/api/sessions', async (req: Request, res: Response) => {
   const sessions = getAllSessions();
-  
+
   const sessionsData = sessions.map(s => ({
     clientId: s.clientId,
     state: s.state,
@@ -112,9 +112,9 @@ router.get('/api/profile/:documentId', async (req: Request, res: Response) => {
   }
 
   if (session.state !== 'Connected') {
-    return res.status(400).json({ 
+    return res.status(400).json({
       error: 'Session not connected',
-      state: session.state 
+      state: session.state
     });
   }
 
@@ -151,8 +151,8 @@ router.post('/api/send-message', async (req: Request, res: Response) => {
     const { clientId, to, message } = req.body as SendMessageRequest;
 
     if (!clientId || !to || !message) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: clientId, to, message' 
+      return res.status(400).json({
+        error: 'Missing required fields: clientId, to, message'
       });
     }
 
@@ -211,11 +211,11 @@ router.post('/api/generate-qr', async (req: Request, res: Response) => {
 
     // Verificar si la sesión ya existe
     const existingSession = getSession(clientId);
-    
+
     if (existingSession && existingSession.state === 'Connected') {
-      return res.status(400).json({ 
+      return res.status(400).json({
         error: 'Session is already connected',
-        state: existingSession.state 
+        state: existingSession.state
       });
     }
 
@@ -248,9 +248,9 @@ router.get('/api/profile/:documentId', (req: Request, res: Response) => {
   }
 
   if (session.state !== 'Connected') {
-    return res.status(400).json({ 
+    return res.status(400).json({
       error: 'Session not connected',
-      state: session.state 
+      state: session.state
     });
   }
 
@@ -281,8 +281,8 @@ router.post('/api/send-message/:clientId', validateApiKey, async (req: Request, 
     const { number, message } = req.body;
 
     if (!number || !message) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: number, message' 
+      return res.status(400).json({
+        error: 'Missing required fields: number, message'
       });
     }
 
@@ -306,8 +306,8 @@ router.post('/api/send-image/:clientId', validateApiKey, async (req: Request, re
     const { number, file, message } = req.body;
 
     if (!number || !file) {
-      return res.status(400).json({ 
-        error: 'Missing required fields: number, file' 
+      return res.status(400).json({
+        error: 'Missing required fields: number, file'
       });
     }
 
@@ -317,17 +317,17 @@ router.post('/api/send-image/:clientId', validateApiKey, async (req: Request, re
     }
 
     const jid = number.includes('@s.whatsapp.net') ? number : `${number}@s.whatsapp.net`;
-    
+
     console.log(`📤 Sending image to ${number} (JID: ${jid}) from ${clientId}`);
     console.log(`📷 Image URL: ${file}`);
     console.log(`💬 Caption: ${message || '(no caption)'}`);
-    
+
     try {
       const result = await session.sock.sendMessage(jid, {
         image: { url: file },
         caption: message || '',
       });
-      
+
       console.log(`✅ Image sent successfully. Message ID:`, result?.key?.id);
     } catch (sendError: any) {
       console.error(`❌ Error sending message:`, sendError.message);
@@ -377,7 +377,7 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
 
     if (profileError || !profile) {
       console.error('[Suite] Profile not found:', profileError);
-      return res.status(403).json({ 
+      return res.status(403).json({
         error: 'Usuario no encontrado',
         message: 'No se pudo verificar tu plan',
         details: profileError?.message
@@ -386,7 +386,7 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
 
     // ⚠️ Permitir si status_plan es null (usuarios nuevos) o true
     if (profile.status_plan === false) {
-      return res.status(403).json({ 
+      return res.status(403).json({
         error: 'Plan inactivo',
         message: 'Tu plan no está activo. Por favor activa tu suscripción.'
       });
@@ -394,7 +394,7 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
 
     // ✅ Verificar que tenga API key generada
     if (!profile.api_key) {
-      return res.status(403).json({ 
+      return res.status(403).json({
         error: 'API Key requerida',
         message: 'Para crear instancias N8N debes generar tu API Key en tu perfil. Ve a Profile → API Key → Generar'
       });
@@ -411,7 +411,7 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
 
     if (!planLimits || !planLimits.can_use_suites) {
       console.error('[Suite] Suite not available for plan:', profile.plan_type);
-      return res.status(403).json({ 
+      return res.status(403).json({
         error: 'Suite no disponible',
         message: 'Tu plan no tiene acceso a Suite/N8N.',
         details: planLimitsError?.message
@@ -431,7 +431,7 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
 
     if (currentSuites >= planLimits.max_suites) {
       console.error('[Suite] Suite limit reached:', { currentSuites, max_suites: planLimits.max_suites });
-      return res.status(403).json({ 
+      return res.status(403).json({
         error: 'Límite de Suites alcanzado',
         message: `Has alcanzado el límite de ${planLimits.max_suites} Suite(s) para tu plan ${profile.plan_type}. ${profile.plan_type === 'free' ? 'Actualiza a un plan superior para crear más instancias.' : 'Elimina una Suite existente o actualiza tu plan.'}`
       });
@@ -439,15 +439,15 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
 
     // Validar formato del nombre
     if (!/^[a-z0-9_-]+$/.test(service_name)) {
-      return res.status(400).json({ 
-        error: 'Invalid service name. Use only lowercase letters, numbers, hyphens and underscores' 
+      return res.status(400).json({
+        error: 'Invalid service name. Use only lowercase letters, numbers, hyphens and underscores'
       });
     }
 
     // Validar nombre reservado
     if (service_name === 'n8n_free_treal') {
-      return res.status(400).json({ 
-        error: 'The name "n8n_free_treal" is reserved by the system' 
+      return res.status(400).json({
+        error: 'The name "n8n_free_treal" is reserved by the system'
       });
     }
 
@@ -462,7 +462,7 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
     if (existingInDb) {
       // Verificar si el contenedor Docker realmente existe
       const containerExists = await dockerService.containerExists(service_name);
-      
+
       if (!containerExists) {
         // Registro huérfano - eliminar de Supabase
         console.log(`[Suite] Cleaning orphaned record: ${service_name}`);
@@ -470,11 +470,11 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
           .from('suites')
           .delete()
           .eq('id', existingInDb.id);
-        
+
         console.log(`[Suite] Orphaned record deleted, proceeding with creation`);
       } else {
-        return res.status(400).json({ 
-          error: `Ya existe una instancia con el nombre "${service_name}". Por favor usa otro nombre o elimina la instancia anterior.` 
+        return res.status(400).json({
+          error: `Ya existe una instancia con el nombre "${service_name}". Por favor usa otro nombre o elimina la instancia anterior.`
         });
       }
     }
@@ -485,12 +485,12 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
 
     if (useEasypanelAPI) {
       console.log('[Suite] Using Easypanel API to create instance');
-      
+
       // Verificar si el servicio ya existe en Easypanel
       const exists = await easypanelService.serviceExists(service_name);
       if (exists) {
-        return res.status(400).json({ 
-          error: 'A service with this name already exists in Easypanel' 
+        return res.status(400).json({
+          error: 'A service with this name already exists in Easypanel'
         });
       }
 
@@ -503,12 +503,12 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
       });
     } else {
       console.log('[Suite] Using Docker direct to create instance');
-      
+
       // Verificar si el contenedor ya existe en Docker
       const exists = await dockerService.containerExists(service_name);
       if (exists) {
-        return res.status(400).json({ 
-          error: 'A Docker container with this name already exists' 
+        return res.status(400).json({
+          error: 'A Docker container with this name already exists'
         });
       }
 
@@ -563,8 +563,8 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('[Suite] ❌ Error creating n8n instance:', error);
-    res.status(500).json({ 
-      error: error.message || 'Failed to create n8n instance' 
+    res.status(500).json({
+      error: error.message || 'Failed to create n8n instance'
     });
   }
 });
@@ -693,10 +693,15 @@ router.post('/api/suite/usage', async (req: Request, res: Response) => {
   }
 });
 
+import chatbotRouter from './routes/chatbot.routes';
+
 // Montar rutas de planes y suscripciones
 router.use('/api', plansRouter);
 
 // Montar rutas de proxies
 router.use('/api/proxies', proxiesRouter);
+
+// Montar rutas de templates (chatbot, spam)
+router.use('/api/templates', chatbotRouter);
 
 export default router;

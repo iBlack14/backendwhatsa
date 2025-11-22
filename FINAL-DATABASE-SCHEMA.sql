@@ -2114,5 +2114,75 @@ COMMENT ON COLUMN public.payments.izipay_response IS 'Respuesta completa de Izip
 ANALYZE public.payments;
 
 -- =====================================================
+-- 7. TABLA DE CHATBOTS (PERSISTENCIA)
+-- =====================================================
+-- Versión: 1.0
+-- Fecha: 2024-11-22
+-- Descripción: Persistencia de configuración de chatbots por instancia
+-- =====================================================
+
+-- Crear tabla para persistencia de chatbots
+CREATE TABLE IF NOT EXISTS instance_chatbots (
+  id UUID DEFAULT uuid_generate_v4() PRIMARY KEY,
+  instance_id TEXT NOT NULL UNIQUE,
+  chatbot_name TEXT NOT NULL,
+  welcome_message TEXT,
+  default_response TEXT,
+  rules JSONB NOT NULL DEFAULT '[]'::jsonb,
+  is_active BOOLEAN DEFAULT true,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Crear índice para búsquedas rápidas por instancia
+CREATE INDEX IF NOT EXISTS idx_instance_chatbots_instance_id ON instance_chatbots(instance_id);
+
+-- Trigger para actualizar updated_at (Reutilizamos la función existente)
+DROP TRIGGER IF EXISTS update_instance_chatbots_updated_at ON instance_chatbots;
+CREATE TRIGGER update_instance_chatbots_updated_at
+    BEFORE UPDATE ON instance_chatbots
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- Políticas RLS para Chatbots
+ALTER TABLE public.instance_chatbots ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view own chatbots" ON public.instance_chatbots;
+CREATE POLICY "Users can view own chatbots"
+  ON public.instance_chatbots FOR SELECT
+  USING (
+    instance_id IN (
+      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+    )
+  );
+
+DROP POLICY IF EXISTS "Users can insert own chatbots" ON public.instance_chatbots;
+CREATE POLICY "Users can insert own chatbots"
+  ON public.instance_chatbots FOR INSERT
+  WITH CHECK (
+    instance_id IN (
+      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+    )
+  );
+
+DROP POLICY IF EXISTS "Users can update own chatbots" ON public.instance_chatbots;
+CREATE POLICY "Users can update own chatbots"
+  ON public.instance_chatbots FOR UPDATE
+  USING (
+    instance_id IN (
+      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+    )
+  );
+
+DROP POLICY IF EXISTS "Users can delete own chatbots" ON public.instance_chatbots;
+CREATE POLICY "Users can delete own chatbots"
+  ON public.instance_chatbots FOR DELETE
+  USING (
+    instance_id IN (
+      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+    )
+  );
+
+-- =====================================================
 -- FIN DEL SCHEMA
 -- =====================================================
