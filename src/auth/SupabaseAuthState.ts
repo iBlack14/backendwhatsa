@@ -1,0 +1,126 @@
+import {
+    AuthenticationCreds,
+    AuthenticationState,
+    SignalDataTypeMap,
+    initAuthCreds,
+    BufferJSON,
+    proto
+} from '@whiskeysockets/baileys';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+
+// Definir tipos para las claves de sesión
+type SessionData = {
+    session_id: string;
+    key: string;
+    value: any;
+};
+
+export const useSupabaseAuthState = async (sessionId: string): Promise<{ state: AuthenticationState, saveCreds: () => Promise<void> }> => {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+        throw new Error('Supabase credentials not configured (SUPABASE_URL, SUPABASE_SERVICE_KEY)');
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
+    const tableName = 'whatsapp_sessions';
+
+    // Función helper para leer datos
+    const readData = async (key: string): Promise<any | null> => {
+        try {
+            const { data, error } = await supabase
+                .from(tableName)
+                .select('value')
+                .eq('session_id', sessionId)
+                .eq('key', key)
+                .single();
+
+            if (error || !data) return null;
+            return JSON.parse(JSON.stringify(data.value), BufferJSON.reviver);
+        } catch (error) {
+            return null;
+        }
+    };
+
+    // Función helper para escribir datos
+    const writeData = async (key: string, value: any): Promise<void> => {
+        try {
+            const jsonValue = JSON.parse(JSON.stringify(value, BufferJSON.replacer));
+
+            const { error } = await supabase
+                .from(tableName)
+                .upsert({
+                    session_id: sessionId,
+                    key: key,
+                    value: jsonValue,
+                    updated_at: new Date().toISOString()
+                }, { onConflict: 'session_id,key' });
+
+            if (error) {
+                console.error(`Error saving session data for ${key}:`, error);
+            }
+        } catch (error) {
+            console.error(`Error processing session data for ${key}:`, error);
+        }
+    };
+
+    // Función helper para eliminar datos
+    const removeData = async (key: string): Promise<void> => {
+        try {
+            await supabase
+                .from(tableName)
+                .delete()
+                .eq('session_id', sessionId)
+                .eq('key', key);
+        } catch (error) {
+            console.error(`Error deleting session data for ${key}:`, error);
+        }
+    };
+
+    // Cargar credenciales iniciales
+    const creds: AuthenticationCreds = (await readData('creds')) || initAuthCreds();
+
+    return {
+        state: {
+            creds,
+            keys: {
+                get: async (type, ids) => {
+                    const data: { [key: string]: any } = {};
+                    await Promise.all(
+                        ids.map(async (id) => {
+                            const key = `${type}-${id}`;
+                            let value = await readData(key);
+                            if (type === 'app-state-sync-key' && value) {
+                                value = proto.Message.AppStateSyncKeyData.fromObject(value);
+                            }
+                            if (value) {
+                                data[id] = value;
+                            }
+                        })
+                    );
+                    return data;
+                },
+                set: async (data) => {
+                    const tasks: Promise<void>[] = [];
+                    for (const category in data) {
+                        const cat = category as keyof SignalDataTypeMap;
+                        for (const id in data[cat]) {
+                            const key = `${cat}-${id}`;
+                            const value = data[cat]?.[id];
+                            if (value) {
+                                tasks.push(writeData(key, value));
+                            } else {
+                                tasks.push(removeData(key));
+                            }
+                        }
+                    }
+                    await Promise.all(tasks);
+                },
+            },
+        },
+        saveCreds: async () => {
+            await writeData('creds', creds);
+        },
+    };
+};

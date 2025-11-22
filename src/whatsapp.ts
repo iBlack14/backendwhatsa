@@ -1,6 +1,5 @@
 import makeWASocket, {
   DisconnectReason,
-  useMultiFileAuthState,
   WASocket,
   WAMessage,
   downloadMediaMessage,
@@ -14,6 +13,7 @@ import { WhatsAppSession } from './types';
 import { proxyService } from './services/proxy.service';
 import { messageService } from './services/message.service';
 import { createClient } from '@supabase/supabase-js';
+import { useSupabaseAuthState } from './auth/SupabaseAuthState';
 
 const sessions = new Map<string, WhatsAppSession>();
 
@@ -74,70 +74,70 @@ async function uploadMediaToSupabase(
  */
 function extractMessageText(message: any): string | undefined {
   if (!message) return undefined;
-  
+
   // Texto simple
   if (message.conversation) return message.conversation;
-  
+
   // Texto extendido (con formato, links, menciones, etc)
   if (message.extendedTextMessage?.text) return message.extendedTextMessage.text;
-  
+
   // Caption de imagen
   if (message.imageMessage?.caption) return message.imageMessage.caption;
-  
+
   // Caption de video
   if (message.videoMessage?.caption) return message.videoMessage.caption;
-  
+
   // Caption de documento
   if (message.documentMessage?.caption) return message.documentMessage.caption;
-  
+
   // Respuesta de botón
   if (message.buttonsResponseMessage?.selectedButtonId) {
     return `Botón: ${message.buttonsResponseMessage.selectedDisplayText || message.buttonsResponseMessage.selectedButtonId}`;
   }
-  
+
   // Respuesta de lista
   if (message.listResponseMessage?.singleSelectReply?.selectedRowId) {
     return `Lista: ${message.listResponseMessage.title || message.listResponseMessage.singleSelectReply.selectedRowId}`;
   }
-  
+
   // Template button reply
   if (message.templateButtonReplyMessage?.selectedId) {
     return `Botón: ${message.templateButtonReplyMessage.selectedDisplayText || message.templateButtonReplyMessage.selectedId}`;
   }
-  
+
   // Ubicación
   if (message.locationMessage) {
     const lat = message.locationMessage.degreesLatitude;
     const lng = message.locationMessage.degreesLongitude;
     return `📍 Ubicación: ${lat}, ${lng}`;
   }
-  
+
   // Contacto
   if (message.contactMessage) {
     return `👤 Contacto: ${message.contactMessage.displayName || 'Sin nombre'}`;
   }
-  
+
   // Contactos múltiples
   if (message.contactsArrayMessage) {
     const count = message.contactsArrayMessage.contacts?.length || 0;
     return `👥 ${count} contacto(s)`;
   }
-  
+
   // Reacción
   if (message.reactionMessage) {
     return `${message.reactionMessage.text} (reacción)`;
   }
-  
+
   // Poll/Encuesta
   if (message.pollCreationMessage) {
     return `📊 Encuesta: ${message.pollCreationMessage.name}`;
   }
-  
+
   // Sticker (emoji o descripción)
   if (message.stickerMessage) {
     return '🎨 Sticker';
   }
-  
+
   return undefined;
 }
 
@@ -148,7 +148,7 @@ function extractMessageText(message: any): string | undefined {
  */
 function detectMessageType(message: any): string {
   if (!message) return 'text';
-  
+
   // Detectar tipos específicos de Baileys
   if (message.conversation) return 'text';
   if (message.extendedTextMessage) return 'text';
@@ -170,7 +170,7 @@ function detectMessageType(message: any): string {
   if (message.reactionMessage) return 'reaction';
   if (message.pollCreationMessage) return 'poll';
   if (message.pollUpdateMessage) return 'poll_update';
-  
+
   // Si no se detecta, retornar el primer key como fallback
   const keys = Object.keys(message);
   return keys.length > 0 ? keys[0].replace('Message', '') : 'unknown';
@@ -191,7 +191,7 @@ async function getInstanceWebhookUrl(instanceId: string): Promise<string | null>
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
-    
+
     const { data, error } = await supabase
       .from('instances')
       .select('webhook_url')
@@ -217,21 +217,13 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
 
   console.log(`🔄 Creating session for ${clientId}...`);
 
-  const sessionPath = path.join(__dirname, '../sessions', clientId);
-  
-  // Asegurar que el directorio de sesiones existe
-  const sessionsDir = path.join(__dirname, '../sessions');
-  if (!fs.existsSync(sessionsDir)) {
-    console.log('📁 Creating sessions directory...');
-    fs.mkdirSync(sessionsDir, { recursive: true });
-  }
-  
-  const { state, saveCreds } = await useMultiFileAuthState(sessionPath);
+  // Usar autenticación basada en Supabase
+  const { state, saveCreds } = await useSupabaseAuthState(clientId);
 
   // Obtener proxy si está configurado
   const proxy = await proxyService.getProxyForInstance(clientId);
   let agent = undefined;
-  
+
   if (proxy) {
     console.log(`🌐 Using proxy: ${proxy.name} (${proxy.type}://${proxy.host}:${proxy.port})`);
     agent = proxyService.createProxyAgent(proxy);
@@ -269,7 +261,7 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
       console.log('='.repeat(60));
       console.log('👉 Scan this QR code with WhatsApp to connect');
       console.log('='.repeat(60) + '\n');
-      
+
       // Imprimir QR en la terminal para debugging
       try {
         const qrTerminal = require('qrcode-terminal');
@@ -277,13 +269,13 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
       } catch (e) {
         console.log('⚠️ qrcode-terminal not installed, skipping terminal QR');
       }
-      
+
       // Convertir QR a base64 para el frontend
       console.log(`🔄 Converting QR to base64...`);
       const qrBase64 = await QRCode.toDataURL(qr);
       session.qr = qrBase64;
       session.state = 'Initializing';
-      
+
       console.log(`💾 Saving QR to database (length: ${qrBase64.length} chars)...`);
       await updateInstanceInN8N(clientId, {
         state: 'Initializing',
@@ -363,35 +355,35 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
   // ✅✅ WEBHOOK: Notificar al frontend cuando se envían/reciben mensajes
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     console.log(`[${clientId}] 📨 messages.upsert event - ${messages.length} message(s)`);
-    
+
     for (const msg of messages) {
       try {
         const fromMe = msg.key.fromMe;
         const remoteJid = msg.key.remoteJid;
         const messageId = msg.key.id;
-        
+
         console.log(`[${clientId}] ${fromMe ? '📤 Sent' : '📥 Received'} message - ${remoteJid}`);
-        
+
         // 💾 Guardar mensaje en la base de datos
         try {
           // Usar la nueva función para extraer texto completo
           const messageText = extractMessageText(msg.message);
           const messageType = detectMessageType(msg.message);
-          
+
           console.log(`[${clientId}] 📋 Message type: ${messageType}`);
           if (messageText) {
             console.log(`[${clientId}] 💬 Content: ${messageText.substring(0, 50)}${messageText.length > 50 ? '...' : ''}`);
           }
-          
+
           // Extraer nombre del contacto
           const senderName = msg.pushName || undefined;
           const senderPhone = remoteJid?.split('@')[0] || undefined;
-          
+
           // Extraer información adicional según el tipo
           let mediaUrl = undefined;
           let fileName = undefined;
           let mimeType = undefined;
-          
+
           // Descargar media si existe
           try {
             if (messageType === 'image' && msg.message?.imageMessage) {
@@ -425,14 +417,14 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
               const buffer = await downloadMediaMessage(msg, 'buffer', {});
               mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
             }
-            
+
             if (mediaUrl) {
               console.log(`[${clientId}] 📎 Media uploaded: ${mediaUrl}`);
             }
           } catch (mediaError) {
             console.error(`[${clientId}] ❌ Error downloading/uploading media:`, mediaError);
           }
-          
+
           // Intentar obtener foto de perfil del contacto
           let profilePicUrl: string | undefined = undefined;
           try {
@@ -464,19 +456,19 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
             metadata: { ...msg, fileName },
             profile_pic_url: profilePicUrl,
           });
-          
+
           console.log(`[${clientId}] ✅ Message saved to database`);
         } catch (dbError) {
           console.error(`[${clientId}] ❌ Error saving message to DB:`, dbError);
         }
-        
+
         // 🔀 LÓGICA DE WEBHOOK: Priorizar webhook_url personalizado (N8N) o usar FRONTEND_URL (Templates)
         let webhookUrl: string | null = null;
         let webhookMode = 'unknown';
-        
+
         // 1️⃣ Intentar obtener webhook_url personalizado de la instancia (modo N8N)
         const customWebhook = await getInstanceWebhookUrl(clientId);
-        
+
         if (customWebhook) {
           webhookUrl = customWebhook;
           webhookMode = 'N8N (custom)';
@@ -484,7 +476,7 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
         } else {
           // 2️⃣ Fallback: usar FRONTEND_URL (modo Templates)
           const frontendUrl = process.env.FRONTEND_URL;
-          
+
           if (frontendUrl) {
             webhookUrl = `${frontendUrl}/api/webhooks/whatsapp`;
             webhookMode = 'Templates (internal)';
@@ -494,7 +486,7 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
             continue;
           }
         }
-        
+
         // Enviar webhook
         await axios.post(webhookUrl, {
           event: 'messages.upsert',
@@ -515,7 +507,7 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
             'Content-Type': 'application/json',
           }
         });
-        
+
         console.log(`[${clientId}] ✅ Webhook sent (${webhookMode}): ${fromMe ? 'sent' : 'received'}`);
       } catch (webhookError: any) {
         console.error(`[${clientId}] ❌ Error sending webhook:`, webhookError.message);
@@ -545,9 +537,9 @@ export async function sendMessage(
   }
 
   const jid = to.includes('@s.whatsapp.net') ? to : `${to}@s.whatsapp.net`;
-  
+
   console.log(`📤 Sending message to ${to} from ${clientId}`);
-  
+
   try {
     await session.sock.sendMessage(jid, { text: message });
     console.log(`✅ Message sent successfully`);
@@ -578,20 +570,20 @@ export async function disconnectSession(clientId: string): Promise<void> {
 
 async function updateInstanceInN8N(clientId: string, data: any): Promise<void> {
   console.log(`\n🔄 Updating instance ${clientId} with data:`, JSON.stringify(data, null, 2));
-  
+
   try {
     // PRIORIDAD 1: Actualizar directamente en Supabase (más confiable)
     const supabaseUrl = process.env.SUPABASE_URL;
     // Aceptar ambos nombres: SUPABASE_SERVICE_KEY o SERVICE_ROLE_KEY
     const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
-    
+
     console.log(`📌 Supabase URL: ${supabaseUrl ? 'Configured ✅' : 'Not configured ❌'}`);
     console.log(`📌 Supabase Key: ${supabaseKey ? 'Configured ✅' : 'Not configured ❌'}`);
 
     if (supabaseUrl && supabaseKey) {
       const updateUrl = `${supabaseUrl}/rest/v1/instances?document_id=eq.${clientId}`;
       console.log(`🌐 Updating Supabase at: ${updateUrl}`);
-      
+
       const response = await axios.patch(
         updateUrl,
         data,
@@ -605,7 +597,7 @@ async function updateInstanceInN8N(clientId: string, data: any): Promise<void> {
         }
       );
       console.log(`✅ Updated instance ${clientId} in Supabase - Status: ${response.status}`);
-      
+
       // PRIORIDAD 2: Intentar N8N como opcional (no crítico)
       const webhookUrl = process.env.N8N_UPDATE_WEBHOOK;
       if (webhookUrl) {
@@ -634,52 +626,55 @@ async function updateInstanceInN8N(clientId: string, data: any): Promise<void> {
 
 // Función para restaurar todas las sesiones existentes al iniciar el servidor
 export async function restoreAllSessions(): Promise<void> {
-  console.log('🔄 Restoring existing sessions...');
-  
-  const sessionsDir = path.join(__dirname, '../sessions');
-  
-  // Verificar si el directorio de sesiones existe
-  if (!fs.existsSync(sessionsDir)) {
-    console.log('⚠️ No sessions directory found. Creating...');
-    fs.mkdirSync(sessionsDir, { recursive: true });
+  console.log('🔄 Restoring existing sessions from Supabase...');
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    console.error('❌ Supabase credentials not configured. Cannot restore sessions.');
     return;
   }
 
-  // Leer todas las carpetas de sesiones
-  const sessionFolders = fs.readdirSync(sessionsDir);
-  
-  if (sessionFolders.length === 0) {
-    console.log('ℹ️ No existing sessions found');
-    return;
+  const supabase = createClient(supabaseUrl, supabaseKey);
+
+  try {
+    // Buscar todas las sesiones que tienen credenciales guardadas
+    // Asumimos que si existe la key 'creds', la sesión es válida
+    const { data, error } = await supabase
+      .from('whatsapp_sessions')
+      .select('session_id')
+      .eq('key', 'creds');
+
+    if (error) {
+      console.error('❌ Error fetching sessions from Supabase:', error);
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      console.log('ℹ️ No existing sessions found in database');
+      return;
+    }
+
+    // Eliminar duplicados por si acaso (aunque key='creds' debería ser único por session_id)
+    const sessionIds = [...new Set(data.map(row => row.session_id))];
+
+    console.log(`📂 Found ${sessionIds.length} session(s) in database`);
+
+    // Restaurar cada sesión
+    for (const clientId of sessionIds) {
+      try {
+        console.log(`🔄 Restoring session: ${clientId}`);
+        await createWhatsAppSession(clientId);
+        // Pequeña pausa entre conexiones
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      } catch (error: any) {
+        console.error(`❌ Failed to restore session ${clientId}:`, error.message);
+      }
+    }
+
+    console.log(`✅ Session restoration complete. Active sessions: ${sessions.size}`);
+  } catch (error: any) {
+    console.error('❌ Error in restoreAllSessions:', error.message);
   }
-
-  console.log(`📂 Found ${sessionFolders.length} session folder(s)`);
-  
-  // Restaurar cada sesión que tenga credenciales guardadas
-  for (const clientId of sessionFolders) {
-    const sessionPath = path.join(sessionsDir, clientId);
-    
-    // Verificar si es un directorio
-    if (!fs.statSync(sessionPath).isDirectory()) {
-      continue;
-    }
-
-    // Verificar si tiene credenciales (archivo creds.json)
-    const credsPath = path.join(sessionPath, 'creds.json');
-    if (!fs.existsSync(credsPath)) {
-      console.log(`⚠️ Skipping ${clientId} - no credentials found`);
-      continue;
-    }
-
-    try {
-      console.log(`🔄 Restoring session: ${clientId}`);
-      await createWhatsAppSession(clientId);
-      // Pequeña pausa entre conexiones para evitar sobrecarga
-      await new Promise(resolve => setTimeout(resolve, 2000));
-    } catch (error: any) {
-      console.error(`❌ Failed to restore session ${clientId}:`, error.message);
-    }
-  }
-  
-  console.log(`✅ Session restoration complete. Active sessions: ${sessions.size}`);
 }

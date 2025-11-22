@@ -56,6 +56,33 @@ BEGIN
   END IF;
 END $$;
 
+-- Tabla de sesiones de WhatsApp (Baileys)
+CREATE TABLE IF NOT EXISTS public.whatsapp_sessions (
+  session_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value JSONB NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (session_id, key)
+);
+
+-- Índices para whatsapp_sessions
+CREATE INDEX IF NOT EXISTS idx_whatsapp_sessions_session_id ON public.whatsapp_sessions(session_id);
+
+-- Habilitar RLS
+ALTER TABLE public.whatsapp_sessions ENABLE ROW LEVEL SECURITY;
+
+-- Políticas para whatsapp_sessions (Servicio puede todo, usuarios nada por defecto o ajustar según necesidad)
+-- Asumiendo que el backend usa service_role, no necesita políticas permisivas para anon/authenticated si no acceden directo.
+-- Pero si se quiere que el usuario dueño de la instancia pueda ver (aunque no es usual para sesiones internas):
+-- CREATE POLICY "Service role manages sessions" ON public.whatsapp_sessions USING (true) WITH CHECK (true);
+
+-- Trigger para updated_at
+DROP TRIGGER IF EXISTS update_whatsapp_sessions_updated_at ON public.whatsapp_sessions;
+CREATE TRIGGER update_whatsapp_sessions_updated_at 
+  BEFORE UPDATE ON public.whatsapp_sessions
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
 -- Tabla de instancias de WhatsApp
 CREATE TABLE IF NOT EXISTS public.instances (
   id UUID NOT NULL DEFAULT gen_random_uuid() PRIMARY KEY,
