@@ -633,100 +633,85 @@ async function updateInstanceInN8N(clientId: string, data: any): Promise<void> {
       }
     } else {
       console.error('❌ Supabase credentials not configured - QR will NOT be saved to database!');
-      console.error('❌ Set SUPABASE_URL and SUPABASE_SERVICE_KEY environment variables');
     }
-  } catch (error: any) {
-    console.error('❌ Error updating instance:', error.message);
-    if (error.response) {
-      console.error('❌ Response status:', error.response.status);
-      // Intentar obtener foto de perfil del contacto
-      let profilePicUrl: string | undefined = undefined;
-      try {
-        if (remoteJid && !fromMe) {
-          // Para chats individuales, usar el JID del remitente
-          // Para grupos, usar el JID del grupo
-          const picJid = remoteJid;
-          profilePicUrl = await sock.profilePictureUrl(picJid, 'image');
-          console.log(`[${clientId}] 📸 Profile pic obtained for ${picJid}`);
-        }
-      } catch (picError) {
-        // No hay foto de perfil o error al obtenerla
-        console.log(`[${clientId}] ⚠️ No profile pic for ${remoteJid}`);
-      }
-
-      await messageService.saveMessage({
-        instance_id: clientId,
-        chat_id: remoteJid || '',
-        message_id: messageId || '',
-        sender_name: senderName,
-        sender_phone: senderPhone,
-        message_text: messageText,
-        message_caption: undefined, // Ya incluido en messageText
-        message_type: messageType,
-        media_url: mediaUrl,
-        from_me: fromMe || false,
-        timestamp: new Date(msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now()),
-        is_read: fromMe || false,
-        metadata: { ...msg, fileName },
-        profile_pic_url: profilePicUrl,
-      });
-
-      console.log(`[${clientId}] ✅ Message saved to database`);
-    } catch (dbError) {
-      console.error(`[${clientId}] ❌ Error saving message to DB:`, dbError);
-    }
-
-    // 🔀 LÓGICA DE WEBHOOK: Priorizar webhook_url personalizado (N8N) o usar FRONTEND_URL (Templates)
-    let webhookUrl: string | null = null;
-    let webhookMode = 'unknown';
-
-    // 1️⃣ Intentar obtener webhook_url personalizado de la instancia (modo N8N)
-    const customWebhook = await getInstanceWebhookUrl(clientId);
-
-    if (customWebhook) {
-      webhookUrl = customWebhook;
-      webhookMode = 'N8N (custom)';
-      console.log(`[${clientId}] 🎯 Using custom webhook (N8N): ${webhookUrl}`);
-    } else {
-      // 2️⃣ Fallback: usar FRONTEND_URL (modo Templates)
-      const frontendUrl = process.env.FRONTEND_URL;
-
-      if (frontendUrl) {
-        webhookUrl = `${frontendUrl}/api/webhooks/whatsapp`;
-        webhookMode = 'Templates (internal)';
-        console.log(`[${clientId}] 🏠 Using internal webhook (Templates): ${webhookUrl}`);
-      } else {
-        console.warn(`[${clientId}] ⚠️ No webhook configured (neither custom nor FRONTEND_URL), skipping`);
-        continue;
-      }
-    }
-
-    // Enviar webhook
-    await axios.post(webhookUrl, {
-      event: 'messages.upsert',
-      instanceId: clientId,
-      data: {
-        fromMe: fromMe,
-        key: {
-          remoteJid: remoteJid,
-          fromMe: fromMe,
-          id: messageId,
-        },
-        message: msg.message,
-        messageTimestamp: msg.messageTimestamp,
-      }
-    }, {
-      timeout: 5000,
-      headers: {
-        'Content-Type': 'application/json',
-      }
-    });
-
-    console.log(`[${clientId}] ✅ Webhook sent (${webhookMode}): ${fromMe ? 'sent' : 'received'}`);
-  } catch (webhookError: any) {
-    console.error(`[${clientId}] ❌ Error sending webhook:`, webhookError.message);
-    // No bloquear el flujo si falla el webhook
+  } catch (picError) {
+    // No hay foto de perfil o error al obtenerla
+    console.log(`[${clientId}] ⚠️ No profile pic for ${remoteJid}`);
   }
+
+  await messageService.saveMessage({
+    instance_id: clientId,
+    chat_id: remoteJid || '',
+    message_id: messageId || '',
+    sender_name: senderName,
+    sender_phone: senderPhone,
+    message_text: messageText,
+    message_caption: undefined, // Ya incluido en messageText
+    message_type: messageType,
+    media_url: mediaUrl,
+    from_me: fromMe || false,
+    timestamp: new Date(msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now()),
+    is_read: fromMe || false,
+    metadata: { ...msg, fileName },
+    profile_pic_url: profilePicUrl,
+  });
+
+  console.log(`[${clientId}] ✅ Message saved to database`);
+} catch (dbError) {
+  console.error(`[${clientId}] ❌ Error saving message to DB:`, dbError);
+}
+
+// 🔀 LÓGICA DE WEBHOOK: Priorizar webhook_url personalizado (N8N) o usar FRONTEND_URL (Templates)
+let webhookUrl: string | null = null;
+let webhookMode = 'unknown';
+
+// 1️⃣ Intentar obtener webhook_url personalizado de la instancia (modo N8N)
+const customWebhook = await getInstanceWebhookUrl(clientId);
+
+if (customWebhook) {
+  webhookUrl = customWebhook;
+  webhookMode = 'N8N (custom)';
+  console.log(`[${clientId}] 🎯 Using custom webhook (N8N): ${webhookUrl}`);
+} else {
+  // 2️⃣ Fallback: usar FRONTEND_URL (modo Templates)
+  const frontendUrl = process.env.FRONTEND_URL;
+
+  if (frontendUrl) {
+    webhookUrl = `${frontendUrl}/api/webhooks/whatsapp`;
+    webhookMode = 'Templates (internal)';
+    console.log(`[${clientId}] 🏠 Using internal webhook (Templates): ${webhookUrl}`);
+  } else {
+    console.warn(`[${clientId}] ⚠️ No webhook configured (neither custom nor FRONTEND_URL), skipping`);
+    continue;
+  }
+}
+
+// Enviar webhook
+await axios.post(webhookUrl, {
+  event: 'messages.upsert',
+  instanceId: clientId,
+  data: {
+    fromMe: fromMe,
+    key: {
+      remoteJid: remoteJid,
+      fromMe: fromMe,
+      id: messageId,
+    },
+    message: msg.message,
+    messageTimestamp: msg.messageTimestamp,
+  }
+}, {
+  timeout: 5000,
+  headers: {
+    'Content-Type': 'application/json',
+  }
+});
+
+console.log(`[${clientId}] ✅ Webhook sent (${webhookMode}): ${fromMe ? 'sent' : 'received'}`);
+  } catch (webhookError: any) {
+  console.error(`[${clientId}] ❌ Error sending webhook:`, webhookError.message);
+  // No bloquear el flujo si falla el webhook
+}
 }
   });
 }
