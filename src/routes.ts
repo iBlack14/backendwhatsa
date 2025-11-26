@@ -13,6 +13,7 @@ import { createClient } from '@supabase/supabase-js';
 import plansRouter from './routes/plans.routes';
 import proxiesRouter from './routes/proxies.routes';
 import messagesRouter from './routes/messages.routes';
+import contactsRouter from './routes/contacts.routes';
 import { validateApiKey } from './middleware/auth.middleware';
 
 const router = Router();
@@ -700,6 +701,9 @@ router.use('/api', plansRouter);
 
 // Montar rutas de proxies
 router.use('/api/proxies', proxiesRouter);
+
+// Montar rutas de contactos
+router.use('/api/contacts', contactsRouter);
 
 // Montar rutas de templates (chatbot, spam)
 router.use('/api/templates', chatbotRouter);

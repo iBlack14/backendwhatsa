@@ -1,12 +1,15 @@
 import 'dotenv/config';
 import express from 'express';
+import { createServer } from 'http';
 import cors from 'cors';
 import routes from './routes';
 import { restoreAllSessions } from './whatsapp';
 import { generalLimiter } from './middleware/rate-limit.middleware';
 import logger, { loggers } from './utils/logger';
+import { wsService } from './websocket';
 
 const app = express();
+const httpServer = createServer(app);
 const PORT = Number(process.env.PORT) || 4000;
 
 // ✅ CORS restrictivo - Solo permitir frontend autorizado
@@ -59,8 +62,11 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   });
 });
 
+// Initialize WebSocket
+wsService.initialize(httpServer);
+
 // Start server
-app.listen(PORT, '0.0.0.0', async () => {
+httpServer.listen(PORT, '0.0.0.0', async () => {
   const host = process.env.HOST || 'localhost';
 
   logger.info('🚀 WhatsApp Backend Server started');
@@ -68,6 +74,7 @@ app.listen(PORT, '0.0.0.0', async () => {
   logger.info(`🌐 Local: http://localhost:${PORT}`);
   logger.info(`🌐 Network: http://${host}:${PORT}`);
   logger.info(`✅ Health check: http://${host}:${PORT}/health`);
+  logger.info(`🔌 WebSocket: ws://${host}:${PORT}/socket.io/`);
 
   logger.info('📋 Available endpoints:');
   logger.info('   POST   /api/create-session');

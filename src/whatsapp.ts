@@ -12,8 +12,10 @@ import QRCode from 'qrcode';
 import { WhatsAppSession } from './types';
 import { proxyService } from './services/proxy.service';
 import { messageService } from './services/message.service';
+import { contactService } from './services/contact.service';
 import { createClient } from '@supabase/supabase-js';
 import { useSupabaseAuthState } from './auth/SupabaseAuthState';
+import { wsService } from './websocket';
 
 const sessions = new Map<string, WhatsAppSession>();
 
@@ -346,6 +348,9 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
         profile_name: session.profileName,
         profile_pic_url: session.profilePicUrl,
       });
+
+      // 🔌 Emitir evento WebSocket de conexión exitosa
+      wsService.emitInstanceStateChange(clientId, 'Connected');
     }
   });
 
@@ -460,7 +465,7 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
             console.log(`[${clientId}] ⚠️ No profile pic for ${remoteJid}`);
           }
 
-          await messageService.saveMessage({
+          const savedMessage = {
             instance_id: clientId,
             chat_id: remoteJid || '',
             message_id: messageId || '',
@@ -475,9 +480,45 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
             is_read: fromMe || false,
             metadata: { ...msg, fileName },
             profile_pic_url: profilePicUrl,
-          });
+          };
+
+          await messageService.saveMessage(savedMessage);
 
           console.log(`[${clientId}] ✅ Message saved to database`);
+
+          // 💾 Guardar/actualizar contacto automáticamente
+          if (!fromMe && remoteJid && !remoteJid.includes('@g.us')) {
+            try {
+              await contactService.saveContact({
+                instance_id: clientId,
+                jid: remoteJid,
+                name: senderName,
+                push_name: senderName,
+                profile_pic_url: profilePicUrl,
+                is_blocked: false,
+              });
+              console.log(`[${clientId}] 💾 Contact saved/updated: ${remoteJid}`);
+            } catch (contactError) {
+              console.error(`[${clientId}] ⚠️ Error saving contact:`, contactError);
+            }
+          }
+
+          // 🔌 Emitir evento WebSocket para actualización en tiempo real
+          try {
+            wsService.emitNewMessage(clientId, {
+              ...savedMessage,
+              instanceId: clientId,
+              chatId: remoteJid,
+              sender: senderName || senderPhone,
+              text: messageText,
+              type: messageType,
+              hasMedia: !!mediaUrl,
+              mediaUrl: mediaUrl,
+            });
+            console.log(`[${clientId}] 🔌 WebSocket event emitted`);
+          } catch (wsError) {
+            console.error(`[${clientId}] ⚠️ Error emitting WebSocket event:`, wsError);
+          }
         } catch (dbError) {
           console.error(`[${clientId}] ❌ Error saving message to DB:`, dbError);
         }
