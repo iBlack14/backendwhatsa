@@ -41,8 +41,8 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Rate limiting general
-app.use('/api/', generalLimiter);
+// Rate limiting general - DESHABILITADO para permitir envío/recepción ilimitada de mensajes
+// app.use('/api/', generalLimiter);
 
 // Logging middleware con Pino
 app.use((req, res, next) => {
