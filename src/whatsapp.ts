@@ -633,6 +633,354 @@ async function updateInstanceInN8N(clientId: string, data: any): Promise<void> {
       }
     } else {
       console.error('❌ Supabase credentials not configured - QR will NOT be saved to database!');
+      console.error('❌ Set SUPABASE_URL and SUPABASE_SERVICE_KEY environment variables');
+    }
+  } catch (error: any) {
+    console.error('❌ Error updating instance:', error.message);
+    if (error.response) {
+      console.error('❌ Response status:', error.response.status);
+      console.error('❌ Response data:', error.response.data);
+    }
+  }
+}
+
+// Función para restaurar todas las sesiones existentes al iniciar el servidor
+export async function restoreAllSessions(): Promise<void> {
+  console.log('🔄 Restoring existing sessions from Supabase...');
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    console.error('❌ Supabase credentials not configured. Cannot restore sessions.');
+    return;
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseKey);
+
+  try {
+    // Buscar todas las sesiones que tienen credenciales guardadas
+    // Asumimos que si existe la key 'creds', la sesión es válida
+    const { data, error } = await supabase
+      .from('whatsapp_sessions')
+      .select('session_id')
+      .eq('key', 'creds');
+
+    if (error) {
+      console.error('❌ Error fetching sessions from Supabase:', error);
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      console.log('ℹ️ No existing sessions found in database');
+      return;
+    }
+
+    // Eliminar duplicados por si acaso (aunque key='creds' debería ser único por session_id)
+    const sessionIds = [...new Set(data.map(row => row.session_id))];
+
+    console.log(`📂 Found ${sessionIds.length} session(s) in database`);
+
+    // Restaurar cada sesión
+    for (const clientId of sessionIds) {
+      try {
+        console.log(`🔄 Restoring session: ${clientId}`);
+        await createWhatsAppSession(clientId);
+        // Pequeña pausa entre conexiones
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      } catch (error: any) {
+        console.error(`❌ Failed to restore session ${clientId}:`, error.message);
+      }
+    }
+
+    console.log(`✅ Session restoration complete. Active sessions: ${sessions.size}`);
+  } catch (error: any) {
+    console.error('❌ Error in restoreAllSessions:', error.message);
+  }
+}
+
+/**
+ * Sincronizar contactos con Supabase
+ */
+async function syncContacts(instanceId: string, contacts: any[]): Promise<void> {
+  if (!contacts || contacts.length === 0) return;
+
+  console.log(`[${instanceId}] 👥 Syncing ${contacts.length} contacts...`);
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    console.warn(`[${instanceId}] ⚠️ Supabase credentials missing, skipping contact sync`);
+    return;
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseKey);
+
+  // Preparar datos para upsert
+  const contactsData = contacts.map(c => ({
+    instance_id: instanceId,
+    jid: c.id,
+    name: c.name || c.notify || c.verifiedName,
+    push_name: c.notify,
+    profile_pic_url: c.imgUrl, // Baileys a veces trae esto
+    updated_at: new Date()
+  }));
+
+  // Procesar en lotes de 50 para no saturar
+  const batchSize = 50;
+  for (let i = 0; i < contactsData.length; i += batchSize) {
+    const batch = contactsData.slice(i, i + batchSize);
+
+    const { error } = await supabase
+      .from('contacts')
+      .upsert(batch, {
+        onConflict: 'instance_id,jid',
+        ignoreDuplicates: false
+      });
+
+    if (error) {
+      console.error(`[${instanceId}] ❌ Error syncing contacts batch ${i}:`, error.message);
+    }
+  }
+
+  console.log(`[${instanceId}] ✅ Contacts synced successfully`);
+}
+
+// Extraer información adicional según el tipo
+let mediaUrl = undefined;
+let fileName = undefined;
+let mimeType = undefined;
+
+// Descargar media si existe
+try {
+  if (messageType === 'image' && msg.message?.imageMessage) {
+    fileName = (msg.message.imageMessage as any).fileName || `image_${Date.now()}.jpg`;
+    mimeType = msg.message.imageMessage.mimetype || 'image/jpeg';
+    const buffer = await downloadMediaMessage(msg, 'buffer', {});
+    mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+  } else if (messageType === 'video' && msg.message?.videoMessage) {
+    fileName = (msg.message.videoMessage as any).fileName || `video_${Date.now()}.mp4`;
+    mimeType = msg.message.videoMessage.mimetype || 'video/mp4';
+    const buffer = await downloadMediaMessage(msg, 'buffer', {});
+    mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+  } else if (messageType === 'audio' && msg.message?.audioMessage) {
+    fileName = `audio_${Date.now()}.mp3`;
+    mimeType = msg.message.audioMessage.mimetype || 'audio/mpeg';
+    const buffer = await downloadMediaMessage(msg, 'buffer', {});
+    mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+  } else if (messageType === 'voice' && msg.message?.audioMessage) {
+    fileName = `voice_${Date.now()}.ogg`;
+    mimeType = msg.message.audioMessage.mimetype || 'audio/ogg';
+    const buffer = await downloadMediaMessage(msg, 'buffer', {});
+    mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+  } else if (messageType === 'document' && msg.message?.documentMessage) {
+    fileName = (msg.message.documentMessage as any).fileName || `document_${Date.now()}`;
+    mimeType = msg.message.documentMessage.mimetype || 'application/octet-stream';
+    const buffer = await downloadMediaMessage(msg, 'buffer', {});
+    mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+  } else if (messageType === 'sticker' && msg.message?.stickerMessage) {
+    fileName = `sticker_${Date.now()}.webp`;
+    mimeType = msg.message.stickerMessage.mimetype || 'image/webp';
+    const buffer = await downloadMediaMessage(msg, 'buffer', {});
+    mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+  }
+
+  if (mediaUrl) {
+    console.log(`[${clientId}] 📎 Media uploaded: ${mediaUrl}`);
+  }
+} catch (mediaError) {
+  console.error(`[${clientId}] ❌ Error downloading/uploading media:`, mediaError);
+}
+
+// Intentar obtener foto de perfil del contacto
+let profilePicUrl: string | undefined = undefined;
+try {
+  if (remoteJid && !fromMe) {
+    // Para chats individuales, usar el JID del remitente
+    // Para grupos, usar el JID del grupo
+    const picJid = remoteJid;
+    profilePicUrl = await sock.profilePictureUrl(picJid, 'image');
+    console.log(`[${clientId}] 📸 Profile pic obtained for ${picJid}`);
+  }
+} catch (picError) {
+  // No hay foto de perfil o error al obtenerla
+  console.log(`[${clientId}] ⚠️ No profile pic for ${remoteJid}`);
+}
+
+await messageService.saveMessage({
+  instance_id: clientId,
+  chat_id: remoteJid || '',
+  message_id: messageId || '',
+  sender_name: senderName,
+  sender_phone: senderPhone,
+  message_text: messageText,
+  message_caption: undefined, // Ya incluido en messageText
+  message_type: messageType,
+  media_url: mediaUrl,
+  from_me: fromMe || false,
+  timestamp: new Date(msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now()),
+  is_read: fromMe || false,
+  metadata: { ...msg, fileName },
+  profile_pic_url: profilePicUrl,
+});
+
+console.log(`[${clientId}] ✅ Message saved to database`);
+        } catch (dbError) {
+  console.error(`[${clientId}] ❌ Error saving message to DB:`, dbError);
+}
+
+// 🔀 LÓGICA DE WEBHOOK: Priorizar webhook_url personalizado (N8N) o usar FRONTEND_URL (Templates)
+let webhookUrl: string | null = null;
+let webhookMode = 'unknown';
+
+// 1️⃣ Intentar obtener webhook_url personalizado de la instancia (modo N8N)
+const customWebhook = await getInstanceWebhookUrl(clientId);
+
+if (customWebhook) {
+  webhookUrl = customWebhook;
+  webhookMode = 'N8N (custom)';
+  console.log(`[${clientId}] 🎯 Using custom webhook (N8N): ${webhookUrl}`);
+} else {
+  // 2️⃣ Fallback: usar FRONTEND_URL (modo Templates)
+  const frontendUrl = process.env.FRONTEND_URL;
+
+  if (frontendUrl) {
+    webhookUrl = `${frontendUrl}/api/webhooks/whatsapp`;
+    webhookMode = 'Templates (internal)';
+    console.log(`[${clientId}] 🏠 Using internal webhook (Templates): ${webhookUrl}`);
+  } else {
+    console.warn(`[${clientId}] ⚠️ No webhook configured (neither custom nor FRONTEND_URL), skipping`);
+    continue;
+  }
+}
+
+// Enviar webhook
+await axios.post(webhookUrl, {
+  event: 'messages.upsert',
+  instanceId: clientId,
+  data: {
+    fromMe: fromMe,
+    key: {
+      remoteJid: remoteJid,
+      fromMe: fromMe,
+      id: messageId,
+    },
+    message: msg.message,
+    messageTimestamp: msg.messageTimestamp,
+  }
+}, {
+  timeout: 5000,
+  headers: {
+    'Content-Type': 'application/json',
+  }
+});
+
+console.log(`[${clientId}] ✅ Webhook sent (${webhookMode}): ${fromMe ? 'sent' : 'received'}`);
+      } catch (webhookError: any) {
+  console.error(`[${clientId}] ❌ Error sending webhook:`, webhookError.message);
+  // No bloquear el flujo si falla el webhook
+}
+    }
+  });
+}
+
+export async function sendMessage(
+  clientId: string,
+  to: string,
+  message: string
+): Promise<void> {
+  const session = sessions.get(clientId);
+
+  if (!session) {
+    throw new Error(`Session not found for clientId: ${clientId}`);
+  }
+
+  if (session.state !== 'Connected') {
+    throw new Error(`Session not connected. Current state: ${session.state}`);
+  }
+
+  if (!session.sock || typeof session.sock.sendMessage !== 'function') {
+    throw new Error('WhatsApp socket is not properly initialized. Please reconnect the session.');
+  }
+
+  const jid = to.includes('@s.whatsapp.net') ? to : `${to}@s.whatsapp.net`;
+
+  console.log(`📤 Sending message to ${to} from ${clientId}`);
+
+  try {
+    await session.sock.sendMessage(jid, { text: message });
+    console.log(`✅ Message sent successfully`);
+  } catch (error: any) {
+    console.error(`❌ Error sending message:`, error);
+    throw new Error(`Failed to send message: ${error.message}`);
+  }
+}
+
+export function getSession(clientId: string): WhatsAppSession | undefined {
+  return sessions.get(clientId);
+}
+
+export function getAllSessions(): WhatsAppSession[] {
+  return Array.from(sessions.values());
+}
+
+export async function disconnectSession(clientId: string): Promise<void> {
+  const session = sessions.get(clientId);
+
+  if (session) {
+    console.log(`🔌 Disconnecting session ${clientId}...`);
+    await session.sock.logout();
+    sessions.delete(clientId);
+    console.log(`✅ Session ${clientId} disconnected`);
+  }
+}
+
+async function updateInstanceInN8N(clientId: string, data: any): Promise<void> {
+  console.log(`\n🔄 Updating instance ${clientId} with data:`, JSON.stringify(data, null, 2));
+
+  try {
+    // PRIORIDAD 1: Actualizar directamente en Supabase (más confiable)
+    const supabaseUrl = process.env.SUPABASE_URL;
+    // Aceptar ambos nombres: SUPABASE_SERVICE_KEY o SERVICE_ROLE_KEY
+    const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
+
+    console.log(`📌 Supabase URL: ${supabaseUrl ? 'Configured ✅' : 'Not configured ❌'}`);
+    console.log(`📌 Supabase Key: ${supabaseKey ? 'Configured ✅' : 'Not configured ❌'}`);
+
+    if (supabaseUrl && supabaseKey) {
+      const updateUrl = `${supabaseUrl}/rest/v1/instances?document_id=eq.${clientId}`;
+      console.log(`🌐 Updating Supabase at: ${updateUrl}`);
+
+      const response = await axios.patch(
+        updateUrl,
+        data,
+        {
+          headers: {
+            'apikey': supabaseKey,
+            'Authorization': `Bearer ${supabaseKey}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+          },
+        }
+      );
+      console.log(`✅ Updated instance ${clientId} in Supabase - Status: ${response.status}`);
+
+      // PRIORIDAD 2: Intentar N8N como opcional (no crítico)
+      const webhookUrl = process.env.N8N_UPDATE_WEBHOOK;
+      if (webhookUrl) {
+        try {
+          await axios.put(webhookUrl, {
+            documentId: clientId,
+            ...data,
+          }, { timeout: 3000 }); // Timeout de 3s
+          console.log(`✅ Also updated via N8N`);
+        } catch (n8nError: any) {
+          console.log(`ℹ️ N8N update skipped (not critical): ${n8nError.message}`);
+        }
+      }
+    } else {
+      console.error('❌ Supabase credentials not configured - QR will NOT be saved to database!');
     }
   } catch (picError) {
     // No hay foto de perfil o error al obtenerla
