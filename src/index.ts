@@ -88,6 +88,9 @@ httpServer.listen(PORT, '0.0.0.0', async () => {
   logger.info('   POST   /api/disconnect/:clientId');
   logger.info('   POST   /api/disconnect-session/:documentId');
   logger.info('   POST   /api/update-webhook/:clientId');
+  logger.info('   GET    /api/contacts/:instanceId');
+  logger.info('   GET    /api/contacts/search/:instanceId?q=');
+  logger.info('   POST   /api/messages/send');
 
   // Restaurar sesiones existentes
   logger.info('🔄 Restoring WhatsApp Sessions...');
