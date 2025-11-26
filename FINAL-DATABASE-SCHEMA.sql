@@ -104,6 +104,21 @@ CREATE TABLE IF NOT EXISTS public.instances (
   CONSTRAINT instances_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE
 );
 
+-- Tabla de contactos de WhatsApp
+CREATE TABLE IF NOT EXISTS public.contacts (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  instance_id TEXT NOT NULL,
+  jid TEXT NOT NULL,
+  name TEXT,
+  push_name TEXT,
+  profile_pic_url TEXT,
+  is_blocked BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT contacts_instance_id_fkey FOREIGN KEY (instance_id) REFERENCES public.instances(document_id) ON DELETE CASCADE,
+  UNIQUE(instance_id, jid)
+);
+
 -- Tabla de mensajes de WhatsApp
 CREATE TABLE IF NOT EXISTS public.messages (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -280,6 +295,12 @@ CREATE TRIGGER update_profiles_updated_at
 DROP TRIGGER IF EXISTS update_messages_updated_at ON public.messages;
 CREATE TRIGGER update_messages_updated_at 
   BEFORE UPDATE ON public.messages
+  BEFORE UPDATE ON public.messages
+  FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS update_contacts_updated_at ON public.contacts;
+CREATE TRIGGER update_contacts_updated_at
+  BEFORE UPDATE ON public.contacts
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 DROP TRIGGER IF EXISTS update_plans_updated_at ON public.plans;
@@ -432,6 +453,45 @@ DROP POLICY IF EXISTS "Users can delete own instances" ON public.instances;
 CREATE POLICY "Users can delete own instances" 
   ON public.instances FOR DELETE 
   USING (auth.uid() = user_id);
+
+  USING (auth.uid() = user_id);
+
+-- Políticas para contacts
+DROP POLICY IF EXISTS "Users can view own contacts" ON public.contacts;
+CREATE POLICY "Users can view own contacts"
+  ON public.contacts FOR SELECT
+  USING (
+    instance_id IN (
+      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+    )
+  );
+
+DROP POLICY IF EXISTS "Users can insert own contacts" ON public.contacts;
+CREATE POLICY "Users can insert own contacts"
+  ON public.contacts FOR INSERT
+  WITH CHECK (
+    instance_id IN (
+      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+    )
+  );
+
+DROP POLICY IF EXISTS "Users can update own contacts" ON public.contacts;
+CREATE POLICY "Users can update own contacts"
+  ON public.contacts FOR UPDATE
+  USING (
+    instance_id IN (
+      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+    )
+  );
+
+DROP POLICY IF EXISTS "Users can delete own contacts" ON public.contacts;
+CREATE POLICY "Users can delete own contacts"
+  ON public.contacts FOR DELETE
+  USING (
+    instance_id IN (
+      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+    )
+  );
 
 -- Políticas para messages
 DROP POLICY IF EXISTS "Users can view their own messages" ON public.messages;

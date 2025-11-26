@@ -352,6 +352,26 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
   // Guardar credenciales
   sock.ev.on('creds.update', saveCreds);
 
+  // ✅ Sincronización de Contactos
+  sock.ev.on('contacts.upsert', async (contacts) => {
+    try {
+      await syncContacts(clientId, contacts);
+    } catch (error) {
+      console.error(`[${clientId}] ❌ Error handling contacts.upsert:`, error);
+    }
+  });
+
+  sock.ev.on('contacts.update', async (updates) => {
+    // Para updates parciales, podríamos necesitar lógica más compleja,
+    // pero por ahora intentamos sincronizar lo que llegue si tiene ID
+    try {
+      const contacts = updates.map(u => ({ ...u, id: u.id }));
+      await syncContacts(clientId, contacts as any);
+    } catch (error) {
+      console.error(`[${clientId}] ❌ Error handling contacts.update:`, error);
+    }
+  });
+
   // ✅✅ WEBHOOK: Notificar al frontend cuando se envían/reciben mensajes
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
     console.log(`[${clientId}] 📨 messages.upsert event - ${messages.length} message(s)`);
@@ -624,57 +644,56 @@ async function updateInstanceInN8N(clientId: string, data: any): Promise<void> {
   }
 }
 
-// Función para restaurar todas las sesiones existentes al iniciar el servidor
-export async function restoreAllSessions(): Promise<void> {
-  console.log('🔄 Restoring existing sessions from Supabase...');
+console.log(`✅ Session restoration complete. Active sessions: ${sessions.size}`);
+  } catch (error: any) {
+  console.error('❌ Error in restoreAllSessions:', error.message);
+}
+}
+
+/**
+ * Sincronizar contactos con Supabase
+ */
+async function syncContacts(instanceId: string, contacts: any[]): Promise<void> {
+  if (!contacts || contacts.length === 0) return;
+
+  console.log(`[${instanceId}] 👥 Syncing ${contacts.length} contacts...`);
 
   const supabaseUrl = process.env.SUPABASE_URL;
   const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
 
   if (!supabaseUrl || !supabaseKey) {
-    console.error('❌ Supabase credentials not configured. Cannot restore sessions.');
+    console.warn(`[${instanceId}] ⚠️ Supabase credentials missing, skipping contact sync`);
     return;
   }
 
   const supabase = createClient(supabaseUrl, supabaseKey);
 
-  try {
-    // Buscar todas las sesiones que tienen credenciales guardadas
-    // Asumimos que si existe la key 'creds', la sesión es válida
-    const { data, error } = await supabase
-      .from('whatsapp_sessions')
-      .select('session_id')
-      .eq('key', 'creds');
+  // Preparar datos para upsert
+  const contactsData = contacts.map(c => ({
+    instance_id: instanceId,
+    jid: c.id,
+    name: c.name || c.notify || c.verifiedName,
+    push_name: c.notify,
+    profile_pic_url: c.imgUrl, // Baileys a veces trae esto
+    updated_at: new Date()
+  }));
+
+  // Procesar en lotes de 50 para no saturar
+  const batchSize = 50;
+  for (let i = 0; i < contactsData.length; i += batchSize) {
+    const batch = contactsData.slice(i, i + batchSize);
+
+    const { error } = await supabase
+      .from('contacts')
+      .upsert(batch, {
+        onConflict: 'instance_id,jid',
+        ignoreDuplicates: false
+      });
 
     if (error) {
-      console.error('❌ Error fetching sessions from Supabase:', error);
-      return;
+      console.error(`[${instanceId}] ❌ Error syncing contacts batch ${i}:`, error.message);
     }
-
-    if (!data || data.length === 0) {
-      console.log('ℹ️ No existing sessions found in database');
-      return;
-    }
-
-    // Eliminar duplicados por si acaso (aunque key='creds' debería ser único por session_id)
-    const sessionIds = [...new Set(data.map(row => row.session_id))];
-
-    console.log(`📂 Found ${sessionIds.length} session(s) in database`);
-
-    // Restaurar cada sesión
-    for (const clientId of sessionIds) {
-      try {
-        console.log(`🔄 Restoring session: ${clientId}`);
-        await createWhatsAppSession(clientId);
-        // Pequeña pausa entre conexiones
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      } catch (error: any) {
-        console.error(`❌ Failed to restore session ${clientId}:`, error.message);
-      }
-    }
-
-    console.log(`✅ Session restoration complete. Active sessions: ${sessions.size}`);
-  } catch (error: any) {
-    console.error('❌ Error in restoreAllSessions:', error.message);
   }
+
+  console.log(`[${instanceId}] ✅ Contacts synced successfully`);
 }
