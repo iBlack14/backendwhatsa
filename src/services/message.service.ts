@@ -109,12 +109,13 @@ export class MessageService {
       const chatData = {
         instance_id: message.instance_id,
         chat_id: message.chat_id,
-        chat_name: message.sender_name || message.chat_id.split('@')[0],
+        // IMPORTANTE: Mantener el nombre existente del chat, solo actualizar si es nuevo
+        chat_name: existingChat?.chat_name || message.sender_name || message.chat_id.split('@')[0],
         chat_type: message.chat_id.includes('@g.us') ? 'group' : 'individual',
         profile_pic_url: message.profile_pic_url || existingChat?.profile_pic_url,
         last_message_text: message.message_text || `${this.getMessageTypeLabel(message.message_type)}`,
         last_message_at: message.timestamp.toISOString(),
-        unread_count: existingChat 
+        unread_count: existingChat
           ? (message.from_me ? existingChat.unread_count : existingChat.unread_count + 1)
           : (message.from_me ? 0 : 1),
         is_archived: existingChat?.is_archived || false,
@@ -122,10 +123,13 @@ export class MessageService {
       };
 
       if (existingChat) {
-        // Actualizar chat existente
+        // Actualizar chat existente (sin cambiar el nombre)
+        const updateData = { ...chatData };
+        delete (updateData as any).chat_name; // No actualizar el nombre si ya existe
+
         await this.supabase
           .from('chats')
-          .update(chatData)
+          .update(updateData)
           .eq('instance_id', message.instance_id)
           .eq('chat_id', message.chat_id);
       } else {
@@ -350,15 +354,15 @@ export class MessageService {
 
       await this.saveMessage(messageData);
 
-      return { 
-        success: true, 
-        messageId: messageData.message_id 
+      return {
+        success: true,
+        messageId: messageData.message_id
       };
     } catch (error: any) {
       console.error('Error sending message:', error);
-      return { 
-        success: false, 
-        error: error.message || 'Failed to send message' 
+      return {
+        success: false,
+        error: error.message || 'Failed to send message'
       };
     }
   }
