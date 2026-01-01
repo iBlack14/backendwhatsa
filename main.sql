@@ -78,6 +78,14 @@ ALTER TABLE public.whatsapp_sessions ENABLE ROW LEVEL SECURITY;
 -- CREATE POLICY "Service role manages A" ON public.whatsapp_sessions USING (true) WITH CHECK (true);
 
 -- Trigger para updated_at
+
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS trigger AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 DROP TRIGGER IF EXISTS update_whatsapp_sessions_updated_at ON public.whatsapp_sessions;
 CREATE TRIGGER update_whatsapp_sessions_updated_at 
   BEFORE UPDATE ON public.whatsapp_sessions
@@ -295,7 +303,6 @@ CREATE TRIGGER update_profiles_updated_at
 DROP TRIGGER IF EXISTS update_messages_updated_at ON public.messages;
 CREATE TRIGGER update_messages_updated_at 
   BEFORE UPDATE ON public.messages
-  BEFORE UPDATE ON public.messages
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 DROP TRIGGER IF EXISTS update_contacts_updated_at ON public.contacts;
@@ -454,7 +461,6 @@ CREATE POLICY "Users can delete own instances"
   ON public.instances FOR DELETE 
   USING (auth.uid() = user_id);
 
-  USING (auth.uid() = user_id);
 
 -- Políticas para contacts
 DROP POLICY IF EXISTS "Users can view own contacts" ON public.contacts;
