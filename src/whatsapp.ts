@@ -16,6 +16,7 @@ import { contactService } from './services/contact.service';
 import { createClient } from '@supabase/supabase-js';
 import { useSupabaseAuthState } from './auth/SupabaseAuthState';
 import { wsService } from './websocket';
+import { supabase } from './lib/supabase';
 
 const sessions = new Map<string, WhatsAppSession>();
 
@@ -29,15 +30,7 @@ async function uploadMediaToSupabase(
   mimeType: string
 ): Promise<string | undefined> {
   try {
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl || !supabaseKey) {
-      console.error('Supabase credentials not configured');
-      return undefined;
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    // const supabase = createClient(supabaseUrl, supabaseKey); // USAR SINGLETON
 
     // Crear path único: instance_id/YYYY-MM/filename
     const date = new Date();
@@ -185,14 +178,7 @@ function detectMessageType(message: any): string {
  */
 async function getInstanceWebhookUrl(instanceId: string): Promise<string | null> {
   try {
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl || !supabaseKey) {
-      return null;
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    // const supabase = createClient(supabaseUrl, supabaseKey); // USAR SINGLETON
 
     const { data, error } = await supabase
       .from('instances')
@@ -634,48 +620,43 @@ async function updateInstanceInN8N(clientId: string, data: any): Promise<void> {
 
   try {
     // PRIORIDAD 1: Actualizar directamente en Supabase (más confiable)
-    const supabaseUrl = process.env.SUPABASE_URL;
-    // Aceptar ambos nombres: SUPABASE_SERVICE_KEY o SERVICE_ROLE_KEY
-    const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
+    // const supabaseUrl = process.env.SUPABASE_URL;
+    // const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
 
-    console.log(`📌 Supabase URL: ${supabaseUrl ? 'Configured ✅' : 'Not configured ❌'}`);
-    console.log(`📌 Supabase Key: ${supabaseKey ? 'Configured ✅' : 'Not configured ❌'}`);
+    // console.log(`📌 Supabase URL: ${supabaseUrl ? 'Configured ✅' : 'Not configured ❌'}`);
+    // console.log(`📌 Supabase Key: ${supabaseKey ? 'Configured ✅' : 'Not configured ❌'}`);
 
-    if (supabaseUrl && supabaseKey) {
-      const updateUrl = `${supabaseUrl}/rest/v1/instances?document_id=eq.${clientId}`;
-      console.log(`🌐 Updating Supabase at: ${updateUrl}`);
+    // if (supabaseUrl && supabaseKey) {
+    // const updateUrl = `${supabaseUrl}/rest/v1/instances?document_id=eq.${clientId}`;
 
-      const response = await axios.patch(
-        updateUrl,
-        data,
-        {
-          headers: {
-            'apikey': supabaseKey,
-            'Authorization': `Bearer ${supabaseKey}`,
-            'Content-Type': 'application/json',
-            'Prefer': 'return=minimal'
-          },
-        }
-      );
-      console.log(`✅ Updated instance ${clientId} in Supabase - Status: ${response.status}`);
+    const { error } = await supabase
+      .from('instances')
+      .update(data)
+      .eq('document_id', clientId);
 
-      // PRIORIDAD 2: Intentar N8N como opcional (no crítico)
-      const webhookUrl = process.env.N8N_UPDATE_WEBHOOK;
-      if (webhookUrl) {
-        try {
-          await axios.put(webhookUrl, {
-            documentId: clientId,
-            ...data,
-          }, { timeout: 3000 }); // Timeout de 3s
-          console.log(`✅ Also updated via N8N`);
-        } catch (n8nError: any) {
-          console.log(`ℹ️ N8N update skipped (not critical): ${n8nError.message}`);
-        }
-      }
+    if (error) {
+      console.error(`❌ Error updating instance in Supabase:`, error.message);
     } else {
-      console.error('❌ Supabase credentials not configured - QR will NOT be saved to database!');
-      console.error('❌ Set SUPABASE_URL and SUPABASE_SERVICE_KEY environment variables');
+      console.log(`✅ Updated instance ${clientId} in Supabase`);
     }
+
+    // PRIORIDAD 2: Intentar N8N como opcional (no crítico)
+    const webhookUrl = process.env.N8N_UPDATE_WEBHOOK;
+    if (webhookUrl) {
+      try {
+        await axios.put(webhookUrl, {
+          documentId: clientId,
+          ...data,
+        }, { timeout: 3000 }); // Timeout de 3s
+        console.log(`✅ Also updated via N8N`);
+      } catch (n8nError: any) {
+        console.log(`ℹ️ N8N update skipped (not critical): ${n8nError.message}`);
+      }
+    }
+    // } else {
+    //   console.error('❌ Supabase credentials not configured - QR will NOT be saved to database!');
+    //   console.error('❌ Set SUPABASE_URL and SUPABASE_SERVICE_KEY environment variables');
+    // }
   } catch (error: any) {
     console.error('❌ Error updating instance:', error.message);
     if (error.response) {
@@ -689,15 +670,7 @@ async function updateInstanceInN8N(clientId: string, data: any): Promise<void> {
 export async function restoreAllSessions(): Promise<void> {
   console.log('🔄 Restoring existing sessions from Supabase...');
 
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !supabaseKey) {
-    console.error('❌ Supabase credentials not configured. Cannot restore sessions.');
-    return;
-  }
-
-  const supabase = createClient(supabaseUrl, supabaseKey);
+  // const supabase = createClient(supabaseUrl, supabaseKey); // USAR SINGLETON
 
   try {
     // Buscar todas las sesiones que tienen credenciales guardadas
@@ -748,15 +721,7 @@ async function syncContacts(instanceId: string, contacts: any[]): Promise<void> 
 
   console.log(`[${instanceId}] 👥 Syncing ${contacts.length} contacts...`);
 
-  const supabaseUrl = process.env.SUPABASE_URL;
-  const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
-
-  if (!supabaseUrl || !supabaseKey) {
-    console.warn(`[${instanceId}] ⚠️ Supabase credentials missing, skipping contact sync`);
-    return;
-  }
-
-  const supabase = createClient(supabaseUrl, supabaseKey);
+  // const supabase = createClient(supabaseUrl, supabaseKey); // USAR SINGLETON
 
   // Preparar datos para upsert
   const contactsData = contacts.map(c => ({

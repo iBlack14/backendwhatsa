@@ -1,5 +1,5 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import * as dotenv from 'dotenv';
+import { supabase } from '../lib/supabase';
 
 dotenv.config();
 
@@ -39,17 +39,17 @@ export interface Chat {
  * Servicio para gestionar mensajes y chats
  */
 export class MessageService {
-  private supabase: SupabaseClient;
+  // private supabase: SupabaseClient; // USAR SINGLETON
 
   constructor() {
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
+    // const supabaseUrl = process.env.SUPABASE_URL;
+    // const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
 
-    if (!supabaseUrl || !supabaseKey) {
-      throw new Error('SUPABASE_URL and SUPABASE_SERVICE_KEY must be set');
-    }
+    // if (!supabaseUrl || !supabaseKey) {
+    //   throw new Error('SUPABASE_URL and SUPABASE_SERVICE_KEY must be set');
+    // }
 
-    this.supabase = createClient(supabaseUrl, supabaseKey);
+    // this.supabase = createClient(supabaseUrl, supabaseKey);
   }
 
   /**
@@ -58,7 +58,7 @@ export class MessageService {
   async saveMessage(message: Message): Promise<boolean> {
     try {
       // 1. Guardar el mensaje
-      const { error } = await this.supabase
+      const { error } = await supabase
         .from('messages')
         .insert({
           instance_id: message.instance_id,
@@ -98,46 +98,51 @@ export class MessageService {
    */
   private async updateOrCreateChat(message: Message): Promise<void> {
     try {
-      // Verificar si el chat existe
-      const { data: existingChat } = await this.supabase
+      const chatData = {
+        instance_id: message.instance_id,
+        chat_id: message.chat_id,
+        chat_name: message.sender_name || message.chat_id.split('@')[0], // Default name
+        chat_type: message.chat_id.includes('@g.us') ? 'group' : 'individual',
+        profile_pic_url: message.profile_pic_url,
+        last_message_text: message.message_text || `${this.getMessageTypeLabel(message.message_type)}`,
+        last_message_at: message.timestamp.toISOString(),
+        is_archived: false,
+        is_pinned: false,
+        unread_count: 0 // Default, will be recalculated/incremented via RPC or manual logic if needed, but for upsert we need base values
+      };
+
+      // OPTIMIZACIÓN: Usar UPSERT para evitar 2 llamadas a DB
+      // Sin embargo, para incrementar unread_count correctamente sin leer primero, necesitamos lógica especial.
+      // Si queremos mantenerlo simple y rápido, podemos usar upsert pero perderíamos el incremento exacto si no tenemos RPC.
+      // Para no romper lógica "sin afectar aplicativo", mantendremos la lógica pero optimizada:
+      // Intentar update primero, si no existe (rows affect 0), entonces insert.
+
+      const { data: currentChat } = await supabase
         .from('chats')
-        .select('*')
+        .select('unread_count, chat_name, profile_pic_url')
         .eq('instance_id', message.instance_id)
         .eq('chat_id', message.chat_id)
         .single();
 
-      const chatData = {
+      const newUnreadCount = currentChat
+        ? (message.from_me ? currentChat.unread_count : currentChat.unread_count + 1)
+        : (message.from_me ? 0 : 1);
+
+      const upsertData = {
         instance_id: message.instance_id,
         chat_id: message.chat_id,
-        // IMPORTANTE: Mantener el nombre existente del chat, solo actualizar si es nuevo
-        chat_name: existingChat?.chat_name || message.sender_name || message.chat_id.split('@')[0],
-        chat_type: message.chat_id.includes('@g.us') ? 'group' : 'individual',
-        profile_pic_url: message.profile_pic_url || existingChat?.profile_pic_url,
-        last_message_text: message.message_text || `${this.getMessageTypeLabel(message.message_type)}`,
-        last_message_at: message.timestamp.toISOString(),
-        unread_count: existingChat
-          ? (message.from_me ? existingChat.unread_count : existingChat.unread_count + 1)
-          : (message.from_me ? 0 : 1),
-        is_archived: existingChat?.is_archived || false,
-        is_pinned: existingChat?.is_pinned || false,
+        chat_type: chatData.chat_type,
+        last_message_text: chatData.last_message_text,
+        last_message_at: chatData.last_message_at,
+        unread_count: newUnreadCount,
+        // Solo actualizar nombre/foto si no existen o si queremos forzar (aquí conservamos lógica original de preservar nombre existente)
+        chat_name: currentChat?.chat_name || chatData.chat_name,
+        profile_pic_url: message.profile_pic_url || currentChat?.profile_pic_url,
       };
 
-      if (existingChat) {
-        // Actualizar chat existente (sin cambiar el nombre)
-        const updateData = { ...chatData };
-        delete (updateData as any).chat_name; // No actualizar el nombre si ya existe
-
-        await this.supabase
-          .from('chats')
-          .update(updateData)
-          .eq('instance_id', message.instance_id)
-          .eq('chat_id', message.chat_id);
-      } else {
-        // Crear nuevo chat
-        await this.supabase
-          .from('chats')
-          .insert(chatData);
-      }
+      await supabase
+        .from('chats')
+        .upsert(upsertData, { onConflict: 'instance_id,chat_id' });
     } catch (error) {
       console.error('Error updating/creating chat:', error);
     }
@@ -168,7 +173,7 @@ export class MessageService {
    */
   async getMessages(instanceId: string, chatId: string, limit: number = 50): Promise<Message[]> {
     try {
-      const { data, error } = await this.supabase
+      const { data, error } = await supabase
         .from('messages')
         .select('*')
         .eq('instance_id', instanceId)
@@ -196,7 +201,7 @@ export class MessageService {
    */
   async getChats(instanceId: string): Promise<Chat[]> {
     try {
-      const { data, error } = await this.supabase
+      const { data, error } = await supabase
         .from('chats')
         .select('*')
         .eq('instance_id', instanceId)
@@ -224,7 +229,7 @@ export class MessageService {
   async markChatAsRead(instanceId: string, chatId: string): Promise<boolean> {
     try {
       // Marcar mensajes como leídos
-      await this.supabase
+      await supabase
         .from('messages')
         .update({ is_read: true })
         .eq('instance_id', instanceId)
@@ -233,7 +238,7 @@ export class MessageService {
         .eq('is_read', false);
 
       // Resetear contador de no leídos
-      await this.supabase
+      await supabase
         .from('chats')
         .update({ unread_count: 0 })
         .eq('instance_id', instanceId)
@@ -251,7 +256,7 @@ export class MessageService {
    */
   async toggleArchiveChat(instanceId: string, chatId: string, archived: boolean): Promise<boolean> {
     try {
-      const { error } = await this.supabase
+      const { error } = await supabase
         .from('chats')
         .update({ is_archived: archived })
         .eq('instance_id', instanceId)
@@ -274,7 +279,7 @@ export class MessageService {
    */
   async togglePinChat(instanceId: string, chatId: string, pinned: boolean): Promise<boolean> {
     try {
-      const { error } = await this.supabase
+      const { error } = await supabase
         .from('chats')
         .update({ is_pinned: pinned })
         .eq('instance_id', instanceId)
@@ -297,7 +302,7 @@ export class MessageService {
    */
   async searchMessages(instanceId: string, query: string, limit: number = 50): Promise<Message[]> {
     try {
-      const { data, error } = await this.supabase
+      const { data, error } = await supabase
         .from('messages')
         .select('*')
         .eq('instance_id', instanceId)
