@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { messageService } from '../services/message.service';
 import { messagesReadLimiter, sendMessageLimiter } from '../middleware/rate-limit.middleware';
+import { supabase } from '../lib/supabase';
 
 const router = Router();
 
@@ -54,10 +55,10 @@ router.post('/send', sendMessageLimiter, async (req: Request, res: Response) => 
       return res.status(500).json({ error: result.error || 'Failed to send message' });
     }
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       messageId: result.messageId,
-      message: 'Message sent successfully' 
+      message: 'Message sent successfully'
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -166,7 +167,7 @@ router.get('/stats/:instanceId', async (req: Request, res: Response) => {
   try {
     const { instanceId } = req.params;
 
-    const { data, error } = await messageService['supabase']
+    const { data, error } = await supabase
       .from('message_stats')
       .select('*')
       .eq('instance_id', instanceId)
