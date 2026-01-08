@@ -34,7 +34,7 @@ class RedisClient {
             });
 
             this.client.on('error', (error) => {
-                logger.error({ error: error.message }, '❌ Redis connection error');
+                logger.error('❌ Redis connection error', { error: error.message });
             });
 
             this.client.on('close', () => {
@@ -46,7 +46,7 @@ class RedisClient {
             });
 
         } catch (error: any) {
-            logger.error({ error: error.message }, '❌ Failed to initialize Redis client');
+            logger.error('❌ Failed to initialize Redis client', { error: error.message });
             this.isEnabled = false;
         }
     }
@@ -60,7 +60,7 @@ class RedisClient {
         try {
             return await this.client.get(key);
         } catch (error: any) {
-            logger.error({ error: error.message, key }, '❌ Redis GET error');
+            logger.error('❌ Redis GET error', { error: error.message, key });
             return null;
         }
     }
@@ -79,7 +79,7 @@ class RedisClient {
             }
             return true;
         } catch (error: any) {
-            logger.error({ error: error.message, key }, '❌ Redis SET error');
+            logger.error('❌ Redis SET error', { error: error.message, key });
             return false;
         }
     }
@@ -94,7 +94,7 @@ class RedisClient {
             await this.client.del(key);
             return true;
         } catch (error: any) {
-            logger.error({ error: error.message, key }, '❌ Redis DEL error');
+            logger.error('❌ Redis DEL error', { error: error.message, key });
             return false;
         }
     }
@@ -112,7 +112,7 @@ class RedisClient {
             const deleted = await this.client.del(...keys);
             return deleted;
         } catch (error: any) {
-            logger.error({ error: error.message, pattern }, '❌ Redis DEL pattern error');
+            logger.error('❌ Redis DEL pattern error', { error: error.message, pattern });
             return 0;
         }
     }
@@ -127,7 +127,7 @@ class RedisClient {
             const result = await this.client.exists(key);
             return result === 1;
         } catch (error: any) {
-            logger.error({ error: error.message, key }, '❌ Redis EXISTS error');
+            logger.error('❌ Redis EXISTS error', { error: error.message, key });
             return false;
         }
     }
@@ -142,7 +142,7 @@ class RedisClient {
             await this.client.expire(key, ttlSeconds);
             return true;
         } catch (error: any) {
-            logger.error({ error: error.message, key }, '❌ Redis EXPIRE error');
+            logger.error('❌ Redis EXPIRE error', { error: error.message, key });
             return false;
         }
     }
@@ -156,7 +156,7 @@ class RedisClient {
         try {
             return await this.client.ttl(key);
         } catch (error: any) {
-            logger.error({ error: error.message, key }, '❌ Redis TTL error');
+            logger.error('❌ Redis TTL error', { error: error.message, key });
             return -2;
         }
     }
@@ -172,7 +172,7 @@ class RedisClient {
             logger.info('🗑️ Redis database flushed');
             return true;
         } catch (error: any) {
-            logger.error({ error: error.message }, '❌ Redis FLUSHDB error');
+            logger.error('❌ Redis FLUSHDB error', { error: error.message });
             return false;
         }
     }
