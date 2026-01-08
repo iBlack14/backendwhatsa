@@ -16,7 +16,7 @@ router.get('/:instanceId', messagesReadLimiter, async (req: Request, res: Respon
 
     // ✅ Try cache first
     const cacheKey = cacheService.keys.contacts(instanceId);
-    const cached = await cacheService.get(cacheKey);
+    const cached = await cacheService.get<any[]>(cacheKey); // Fix: Explicit type annotation
 
     if (cached) {
       return res.json({
