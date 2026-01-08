@@ -1,27 +1,9 @@
 /**
- * Logger estructurado con Pino
- * Reemplaza console.log con logging profesional
+ * Logger profesional con Winston
+ * Reemplaza Pino con Winston para logging con rotación de archivos
  */
 
-import pino from 'pino';
-
-/**
- * Configuración del logger
- */
-const logger = pino({
-  level: process.env.LOG_LEVEL || 'info',
-  transport: process.env.NODE_ENV !== 'production' ? {
-    target: 'pino-pretty',
-    options: {
-      colorize: true,
-      translateTime: 'HH:MM:ss Z',
-      ignore: 'pid,hostname',
-    },
-  } : undefined,
-  base: {
-    env: process.env.NODE_ENV || 'development',
-  },
-});
+import logger from '../config/logger.config';
 
 /**
  * Logger específico para WhatsApp operations
@@ -51,84 +33,89 @@ export const loggers = {
    * Log de inicio de sesión WhatsApp
    */
   sessionCreated: (clientId: string, details?: any) => {
-    whatsappLogger.info({ clientId, ...details }, 'WhatsApp session created');
+    whatsappLogger.info('WhatsApp session created', { clientId, ...details });
   },
 
   /**
    * Log de mensaje enviado
    */
   messageSent: (clientId: string, to: string, messageId?: string) => {
-    whatsappLogger.info({ clientId, to, messageId }, 'Message sent successfully');
+    whatsappLogger.info('Message sent successfully', { clientId, to, messageId });
   },
 
   /**
    * Log de mensaje recibido
    */
   messageReceived: (clientId: string, from: string, type: string) => {
-    whatsappLogger.info({ clientId, from, type }, 'Message received');
+    whatsappLogger.info('Message received', { clientId, from, type });
   },
 
   /**
    * Log de error en WhatsApp
    */
   whatsappError: (clientId: string, error: Error, context?: any) => {
-    whatsappLogger.error({ clientId, error: error.message, stack: error.stack, ...context }, 'WhatsApp error');
+    whatsappLogger.error('WhatsApp error', {
+      clientId,
+      error: error.message,
+      stack: error.stack,
+      ...context
+    });
   },
 
   /**
    * Log de API request
    */
   apiRequest: (method: string, path: string, ip?: string, userId?: string) => {
-    apiLogger.info({ method, path, ip, userId }, 'API request');
+    apiLogger.info('API request', { method, path, ip, userId });
   },
 
   /**
    * Log de API error
    */
   apiError: (method: string, path: string, error: Error, statusCode?: number) => {
-    apiLogger.error({ method, path, error: error.message, statusCode }, 'API error');
+    apiLogger.error('API error', { method, path, error: error.message, statusCode });
   },
 
   /**
    * Log de operación de base de datos
    */
   dbQuery: (operation: string, table: string, duration?: number) => {
-    dbLogger.debug({ operation, table, duration }, 'Database query');
+    dbLogger.debug('Database query', { operation, table, duration });
   },
 
   /**
    * Log de error de base de datos
    */
   dbError: (operation: string, table: string, error: Error) => {
-    dbLogger.error({ operation, table, error: error.message }, 'Database error');
+    dbLogger.error('Database error', { operation, table, error: error.message });
   },
 
   /**
    * Log de operación Docker
    */
   dockerOperation: (operation: string, containerName: string, details?: any) => {
-    dockerLogger.info({ operation, containerName, ...details }, 'Docker operation');
+    dockerLogger.info('Docker operation', { operation, containerName, ...details });
   },
 
   /**
    * Log de error Docker
    */
   dockerError: (operation: string, error: Error, context?: any) => {
-    dockerLogger.error({ operation, error: error.message, ...context }, 'Docker error');
+    dockerLogger.error('Docker error', { operation, error: error.message, ...context });
   },
 
   /**
    * Log de webhook enviado
    */
   webhookSent: (url: string, event: string, success: boolean) => {
-    whatsappLogger.info({ url, event, success }, 'Webhook sent');
+    whatsappLogger.info('Webhook sent', { url, event, success });
   },
 
   /**
    * Log de rate limit excedido
    */
   rateLimitExceeded: (ip: string, endpoint: string) => {
-    apiLogger.warn({ ip, endpoint }, 'Rate limit exceeded');
+    apiLogger.warn('Rate limit exceeded', { ip, endpoint });
   },
 };
 
