@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { contactService } from '../services/contact.service';
 import { messagesReadLimiter } from '../middleware/rate-limit.middleware';
+import cacheService from '../services/cache.service';
 
 const router = Router();
 
@@ -13,12 +14,30 @@ router.get('/:instanceId', messagesReadLimiter, async (req: Request, res: Respon
     const { instanceId } = req.params;
     const limit = parseInt(req.query.limit as string) || 100;
 
+    // ✅ Try cache first
+    const cacheKey = cacheService.keys.contacts(instanceId);
+    const cached = await cacheService.get(cacheKey);
+
+    if (cached) {
+      return res.json({
+        success: true,
+        contacts: cached,
+        count: cached.length,
+        cached: true
+      });
+    }
+
+    // Cache miss - fetch from database
     const contacts = await contactService.getContacts(instanceId, limit);
+
+    // ✅ Cache the result
+    await cacheService.set(cacheKey, contacts, cacheService.ttl.contacts);
 
     res.json({
       success: true,
       contacts,
-      count: contacts.length
+      count: contacts.length,
+      cached: false
     });
   } catch (error: any) {
     res.status(500).json({

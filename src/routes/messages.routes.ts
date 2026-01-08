@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { messageService } from '../services/message.service';
 import { messagesReadLimiter, sendMessageLimiter } from '../middleware/rate-limit.middleware';
 import { supabase } from '../lib/supabase';
+import cacheService from '../services/cache.service';
 
 const router = Router();
 
@@ -12,9 +13,22 @@ const router = Router();
 router.get('/chats/:instanceId', async (req: Request, res: Response) => {
   try {
     const { instanceId } = req.params;
+
+    // ✅ Try cache first
+    const cacheKey = cacheService.keys.chatList(instanceId);
+    const cached = await cacheService.get(cacheKey);
+
+    if (cached) {
+      return res.json({ chats: cached, cached: true });
+    }
+
+    // Cache miss - fetch from database
     const chats = await messageService.getChats(instanceId);
 
-    res.json({ chats });
+    // ✅ Cache the result
+    await cacheService.set(cacheKey, chats, cacheService.ttl.messages);
+
+    res.json({ chats, cached: false });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -29,9 +43,21 @@ router.get('/:instanceId/:chatId', async (req: Request, res: Response) => {
     const { instanceId, chatId } = req.params;
     const limit = parseInt(req.query.limit as string) || 50;
 
+    // ✅ Try cache first
+    const cacheKey = cacheService.keys.messages(instanceId, chatId);
+    const cached = await cacheService.get(cacheKey);
+
+    if (cached) {
+      return res.json({ messages: cached, cached: true });
+    }
+
+    // Cache miss - fetch from database
     const messages = await messageService.getMessages(instanceId, chatId, limit);
 
-    res.json({ messages });
+    // ✅ Cache the result
+    await cacheService.set(cacheKey, messages, cacheService.ttl.messages);
+
+    res.json({ messages, cached: false });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
