@@ -15,7 +15,7 @@ class CacheService {
 
             return JSON.parse(value) as T;
         } catch (error: any) {
-            logger.error({ error: error.message, key }, '❌ Cache GET error');
+            logger.error('❌ Cache GET error', { error: error.message, key });
             return null;
         }
     }
@@ -28,7 +28,7 @@ class CacheService {
             const serialized = JSON.stringify(value);
             return await redisClient.set(key, serialized, ttlSeconds);
         } catch (error: any) {
-            logger.error({ error: error.message, key }, '❌ Cache SET error');
+            logger.error('❌ Cache SET error', { error: error.message, key });
             return false;
         }
     }
@@ -100,11 +100,11 @@ class CacheService {
         // Try cache first
         const cached = await this.get<T>(key);
         if (cached !== null) {
-            logger.debug({ key }, '✅ Cache HIT');
+            logger.debug('✅ Cache HIT', { key });
             return cached;
         }
 
-        logger.debug({ key }, '❌ Cache MISS - fetching...');
+        logger.debug('❌ Cache MISS - fetching...', { key });
 
         // Cache miss - fetch from source
         const data = await fetchFn();
@@ -121,7 +121,7 @@ class CacheService {
      * Invalidate all caches for an instance
      */
     async invalidateInstance(instanceId: string): Promise<void> {
-        logger.info({ instanceId }, '🗑️ Invalidating instance cache');
+        logger.info('🗑️ Invalidating instance cache', { instanceId });
 
         await Promise.all([
             this.delPattern(`session:${instanceId}*`),

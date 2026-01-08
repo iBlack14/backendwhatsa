@@ -99,7 +99,7 @@ httpServer.listen(PORT, '0.0.0.0', async () => {
     await restoreAllSessions();
     logger.info('✅ Sessions restored successfully');
   } catch (error: any) {
-    logger.error({ error: error.message }, '❌ Error restoring sessions');
+    logger.error('❌ Error restoring sessions', { error: error.message });
   }
 });
 
