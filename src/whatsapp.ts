@@ -17,6 +17,7 @@ import { createClient } from '@supabase/supabase-js';
 import { useSupabaseAuthState } from './auth/SupabaseAuthState';
 import { wsService } from './websocket';
 import { supabase } from './lib/supabase';
+import cacheService from './services/cache.service';
 
 const sessions = new Map<string, WhatsAppSession>();
 
@@ -264,6 +265,13 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
       session.qr = qrBase64;
       session.state = 'Initializing';
 
+      // ✅ Cache QR code
+      await cacheService.set(
+        cacheService.keys.sessionQR(clientId),
+        qrBase64,
+        cacheService.ttl.qr
+      );
+
       console.log(`💾 Saving QR to database (length: ${qrBase64.length} chars)...`);
       await updateInstanceInN8N(clientId, {
         state: 'Initializing',
@@ -295,6 +303,10 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
       } else {
         session.state = 'Disconnected';
         sessions.delete(clientId);
+
+        // ✅ Clear all cache for this session
+        await cacheService.delPattern(`session:${clientId}*`);
+
         await updateInstanceInN8N(clientId, {
           state: 'Disconnected',
           qr: null,
@@ -305,6 +317,9 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
       console.log(`✅ Connection opened for ${clientId}`);
       session.state = 'Connected';
       session.qr = null;
+
+      // ✅ Clear QR from cache on successful connection
+      await cacheService.del(cacheService.keys.sessionQR(clientId));
 
       // Obtener info del usuario
       const user = sock.user;
@@ -325,6 +340,18 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
           session.profilePicUrl = undefined;
         }
       }
+
+      // ✅ Cache session state
+      await cacheService.set(
+        cacheService.keys.sessionState(clientId),
+        {
+          state: 'Connected',
+          phoneNumber: session.phoneNumber,
+          profileName: session.profileName,
+          profilePicUrl: session.profilePicUrl,
+        },
+        cacheService.ttl.session
+      );
 
       await updateInstanceInN8N(clientId, {
         state: 'Connected',
