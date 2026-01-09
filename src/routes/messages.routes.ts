@@ -43,22 +43,32 @@ router.get('/:instanceId/:chatId', async (req: Request, res: Response) => {
     const { instanceId, chatId } = req.params;
     const limit = parseInt(req.query.limit as string) || 50;
 
+    console.log(`📨 GET messages for instance=${instanceId}, chat=${chatId}, limit=${limit}`);
+
     // ✅ Try cache first
     const cacheKey = cacheService.keys.messages(instanceId, chatId);
     const cached = await cacheService.get(cacheKey);
 
     if (cached) {
+      console.log(`✅ Cache HIT for ${chatId} - ${(cached as any[]).length} messages`);
       return res.json({ messages: cached, cached: true });
     }
+
+    console.log(`❌ Cache MISS for ${chatId} - fetching from DB`);
 
     // Cache miss - fetch from database
     const messages = await messageService.getMessages(instanceId, chatId, limit);
 
-    // ✅ Cache the result
-    await cacheService.set(cacheKey, messages, cacheService.ttl.messages);
+    console.log(`📋 DB returned ${messages.length} messages for ${chatId}`);
+
+    // ✅ Cache the result (only if we have messages)
+    if (messages.length > 0) {
+      await cacheService.set(cacheKey, messages, cacheService.ttl.messages);
+    }
 
     res.json({ messages, cached: false });
   } catch (error: any) {
+    console.error('Error loading messages:', error);
     res.status(500).json({ error: error.message });
   }
 });

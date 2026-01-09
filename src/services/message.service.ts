@@ -86,6 +86,16 @@ export class MessageService {
       // 2. Actualizar o crear el chat
       await this.updateOrCreateChat(message);
 
+      // 3. 🔥 Invalidar caché para que los mensajes se carguen frescos
+      try {
+        const cacheService = require('./cache.service').default;
+        await cacheService.del(cacheService.keys.messages(message.instance_id, message.chat_id));
+        await cacheService.del(cacheService.keys.chatList(message.instance_id));
+        console.log(`🗑️ Cache invalidated for chat: ${message.chat_id}`);
+      } catch (cacheError) {
+        console.log('Cache invalidation skipped (Redis may not be enabled)');
+      }
+
       return true;
     } catch (error) {
       console.error('Error saving message:', error);
