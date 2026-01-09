@@ -120,24 +120,38 @@ export class MessageService {
    */
   private async updateOrCreateChat(message: Message): Promise<void> {
     try {
+      // Determinar el nombre correcto del chat
+      let chatName = message.chat_id.split('@')[0]; // Default: número de teléfono
+
+      // Si es mensaje recibido, usar el nombre del remitente
+      if (!message.from_me && message.sender_name) {
+        chatName = message.sender_name;
+      } else {
+        // Si es mensaje enviado por nosotros, buscar el nombre del contacto
+        const { data: contact } = await supabase
+          .from('contacts')
+          .select('name, push_name')
+          .eq('instance_id', message.instance_id)
+          .eq('jid', message.chat_id)
+          .single();
+
+        if (contact) {
+          chatName = contact.name || contact.push_name || chatName;
+        }
+      }
+
       const chatData = {
         instance_id: message.instance_id,
         chat_id: message.chat_id,
-        chat_name: message.sender_name || message.chat_id.split('@')[0], // Default name
+        chat_name: chatName,
         chat_type: message.chat_id.includes('@g.us') ? 'group' : 'individual',
         profile_pic_url: message.profile_pic_url,
         last_message_text: message.message_text || `${this.getMessageTypeLabel(message.message_type)}`,
         last_message_at: message.timestamp.toISOString(),
         is_archived: false,
         is_pinned: false,
-        unread_count: 0 // Default, will be recalculated/incremented via RPC or manual logic if needed, but for upsert we need base values
+        unread_count: 0
       };
-
-      // OPTIMIZACIÓN: Usar UPSERT para evitar 2 llamadas a DB
-      // Sin embargo, para incrementar unread_count correctamente sin leer primero, necesitamos lógica especial.
-      // Si queremos mantenerlo simple y rápido, podemos usar upsert pero perderíamos el incremento exacto si no tenemos RPC.
-      // Para no romper lógica "sin afectar aplicativo", mantendremos la lógica pero optimizada:
-      // Intentar update primero, si no existe (rows affect 0), entonces insert.
 
       const { data: currentChat } = await supabase
         .from('chats')
@@ -157,8 +171,10 @@ export class MessageService {
         last_message_text: chatData.last_message_text,
         last_message_at: chatData.last_message_at,
         unread_count: newUnreadCount,
-        // Solo actualizar nombre/foto si no existen o si queremos forzar (aquí conservamos lógica original de preservar nombre existente)
-        chat_name: currentChat?.chat_name || chatData.chat_name,
+        // Si ya existe un nombre en el chat, mantenerlo a menos que sea solo el número
+        chat_name: (currentChat?.chat_name && !currentChat.chat_name.match(/^\d+$/))
+          ? currentChat.chat_name
+          : chatData.chat_name,
         profile_pic_url: message.profile_pic_url || currentChat?.profile_pic_url,
       };
 
