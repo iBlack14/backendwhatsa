@@ -58,9 +58,10 @@ export class MessageService {
   async saveMessage(message: Message): Promise<boolean> {
     try {
       // 1. Guardar el mensaje
+      // ✅ Use UPSERT to handle duplicate messages gracefully
       const { error } = await supabase
         .from('messages')
-        .insert({
+        .upsert({
           instance_id: message.instance_id,
           chat_id: message.chat_id,
           message_id: message.message_id,
@@ -74,6 +75,9 @@ export class MessageService {
           timestamp: message.timestamp.toISOString(),
           is_read: message.is_read,
           metadata: message.metadata,
+        }, {
+          onConflict: 'message_id',
+          ignoreDuplicates: true
         });
 
       if (error) {

@@ -9,6 +9,10 @@ import logger, { loggers } from './utils/logger';
 import { wsService } from './websocket';
 
 const app = express();
+
+// ✅ Trust proxy for rate limiting behind reverse proxies (Docker, Nginx, etc.)
+app.set('trust proxy', 1);
+
 const httpServer = createServer(app);
 const PORT = Number(process.env.PORT) || 4000;
 

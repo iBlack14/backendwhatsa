@@ -402,139 +402,153 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
 
         console.log(`[${clientId}] ${fromMe ? '📤 Sent' : '📥 Received'} message - ${remoteJid}`);
 
-        // 💾 Guardar mensaje en la base de datos
-        try {
-          // Usar la nueva función para extraer texto completo
-          const messageText = extractMessageText(msg.message);
-          const messageType = detectMessageType(msg.message);
+        // ✅ Verificar que la instancia existe en la tabla instances antes de guardar
+        const { data: instanceExists } = await supabase
+          .from('instances')
+          .select('document_id')
+          .eq('document_id', clientId)
+          .single();
 
-          console.log(`[${clientId}] 📋 Message type: ${messageType}`);
-          if (messageText) {
-            console.log(`[${clientId}] 💬 Content: ${messageText.substring(0, 50)}${messageText.length > 50 ? '...' : ''}`);
-          }
-
-          // Extraer nombre del contacto
-          const senderName = msg.pushName || undefined;
-          const senderPhone = remoteJid?.split('@')[0] || undefined;
-
-          // Extraer información adicional según el tipo
-          let mediaUrl = undefined;
-          let fileName = undefined;
-          let mimeType = undefined;
-
-          // Descargar media si existe
-          try {
-            if (messageType === 'image' && msg.message?.imageMessage) {
-              fileName = (msg.message.imageMessage as any).fileName || `image_${Date.now()}.jpg`;
-              mimeType = msg.message.imageMessage.mimetype || 'image/jpeg';
-              const buffer = await downloadMediaMessage(msg, 'buffer', {});
-              mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
-            } else if (messageType === 'video' && msg.message?.videoMessage) {
-              fileName = (msg.message.videoMessage as any).fileName || `video_${Date.now()}.mp4`;
-              mimeType = msg.message.videoMessage.mimetype || 'video/mp4';
-              const buffer = await downloadMediaMessage(msg, 'buffer', {});
-              mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
-            } else if (messageType === 'audio' && msg.message?.audioMessage) {
-              fileName = `audio_${Date.now()}.mp3`;
-              mimeType = msg.message.audioMessage.mimetype || 'audio/mpeg';
-              const buffer = await downloadMediaMessage(msg, 'buffer', {});
-              mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
-            } else if (messageType === 'voice' && msg.message?.audioMessage) {
-              fileName = `voice_${Date.now()}.ogg`;
-              mimeType = msg.message.audioMessage.mimetype || 'audio/ogg';
-              const buffer = await downloadMediaMessage(msg, 'buffer', {});
-              mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
-            } else if (messageType === 'document' && msg.message?.documentMessage) {
-              fileName = (msg.message.documentMessage as any).fileName || `document_${Date.now()}`;
-              mimeType = msg.message.documentMessage.mimetype || 'application/octet-stream';
-              const buffer = await downloadMediaMessage(msg, 'buffer', {});
-              mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
-            } else if (messageType === 'sticker' && msg.message?.stickerMessage) {
-              fileName = `sticker_${Date.now()}.webp`;
-              mimeType = msg.message.stickerMessage.mimetype || 'image/webp';
-              const buffer = await downloadMediaMessage(msg, 'buffer', {});
-              mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
-            }
-
-            if (mediaUrl) {
-              console.log(`[${clientId}] 📎 Media uploaded: ${mediaUrl}`);
-            }
-          } catch (mediaError) {
-            console.error(`[${clientId}] ❌ Error downloading/uploading media:`, mediaError);
-          }
-
-          // Intentar obtener foto de perfil del contacto
-          let profilePicUrl: string | undefined = undefined;
-          try {
-            if (remoteJid && !fromMe) {
-              // Para chats individuales, usar el JID del remitente
-              // Para grupos, usar el JID del grupo
-              const picJid = remoteJid;
-              profilePicUrl = await sock.profilePictureUrl(picJid, 'image');
-              console.log(`[${clientId}] 📸 Profile pic obtained for ${picJid}`);
-            }
-          } catch (picError) {
-            // No hay foto de perfil o error al obtenerla
-            console.log(`[${clientId}] ⚠️ No profile pic for ${remoteJid}`);
-          }
-
-          const savedMessage = {
-            instance_id: clientId,
-            chat_id: remoteJid || '',
-            message_id: messageId || '',
-            sender_name: senderName,
-            sender_phone: senderPhone,
-            message_text: messageText,
-            message_caption: undefined, // Ya incluido en messageText
-            message_type: messageType,
-            media_url: mediaUrl,
-            from_me: fromMe || false,
-            timestamp: new Date(msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now()),
-            is_read: fromMe || false,
-            metadata: { ...msg, fileName },
-            profile_pic_url: profilePicUrl,
-          };
-
-          await messageService.saveMessage(savedMessage);
-
-          console.log(`[${clientId}] ✅ Message saved to database`);
-
-          // 💾 Guardar/actualizar contacto automáticamente
-          if (!fromMe && remoteJid && !remoteJid.includes('@g.us')) {
-            try {
-              await contactService.saveContact({
-                instance_id: clientId,
-                jid: remoteJid,
-                name: senderName,
-                push_name: senderName,
-                profile_pic_url: profilePicUrl,
-                is_blocked: false,
-              });
-              console.log(`[${clientId}] 💾 Contact saved/updated: ${remoteJid}`);
-            } catch (contactError) {
-              console.error(`[${clientId}] ⚠️ Error saving contact:`, contactError);
-            }
-          }
-
-          // 🔌 Emitir evento WebSocket para actualización en tiempo real
-          try {
-            wsService.emitNewMessage(clientId, {
-              ...savedMessage,
-              instanceId: clientId,
-              chatId: remoteJid,
-              sender: senderName || senderPhone,
-              text: messageText,
-              type: messageType,
-              hasMedia: !!mediaUrl,
-              mediaUrl: mediaUrl,
-            });
-            console.log(`[${clientId}] 🔌 WebSocket event emitted`);
-          } catch (wsError) {
-            console.error(`[${clientId}] ⚠️ Error emitting WebSocket event:`, wsError);
-          }
-        } catch (dbError) {
-          console.error(`[${clientId}] ❌ Error saving message to DB:`, dbError);
+        if (!instanceExists) {
+          console.log(`[${clientId}] ⚠️ Instance not found in database, skipping message save (session exists but instance row missing)`);
+          // Continuar con el webhook pero no guardar en DB
         }
+
+        // 💾 Guardar mensaje en la base de datos (solo si la instancia existe)
+        if (instanceExists) {
+          try {
+            // Usar la nueva función para extraer texto completo
+            const messageText = extractMessageText(msg.message);
+            const messageType = detectMessageType(msg.message);
+
+            console.log(`[${clientId}] 📋 Message type: ${messageType}`);
+            if (messageText) {
+              console.log(`[${clientId}] 💬 Content: ${messageText.substring(0, 50)}${messageText.length > 50 ? '...' : ''}`);
+            }
+
+            // Extraer nombre del contacto
+            const senderName = msg.pushName || undefined;
+            const senderPhone = remoteJid?.split('@')[0] || undefined;
+
+            // Extraer información adicional según el tipo
+            let mediaUrl = undefined;
+            let fileName = undefined;
+            let mimeType = undefined;
+
+            // Descargar media si existe
+            try {
+              if (messageType === 'image' && msg.message?.imageMessage) {
+                fileName = (msg.message.imageMessage as any).fileName || `image_${Date.now()}.jpg`;
+                mimeType = msg.message.imageMessage.mimetype || 'image/jpeg';
+                const buffer = await downloadMediaMessage(msg, 'buffer', {});
+                mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+              } else if (messageType === 'video' && msg.message?.videoMessage) {
+                fileName = (msg.message.videoMessage as any).fileName || `video_${Date.now()}.mp4`;
+                mimeType = msg.message.videoMessage.mimetype || 'video/mp4';
+                const buffer = await downloadMediaMessage(msg, 'buffer', {});
+                mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+              } else if (messageType === 'audio' && msg.message?.audioMessage) {
+                fileName = `audio_${Date.now()}.mp3`;
+                mimeType = msg.message.audioMessage.mimetype || 'audio/mpeg';
+                const buffer = await downloadMediaMessage(msg, 'buffer', {});
+                mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+              } else if (messageType === 'voice' && msg.message?.audioMessage) {
+                fileName = `voice_${Date.now()}.ogg`;
+                mimeType = msg.message.audioMessage.mimetype || 'audio/ogg';
+                const buffer = await downloadMediaMessage(msg, 'buffer', {});
+                mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+              } else if (messageType === 'document' && msg.message?.documentMessage) {
+                fileName = (msg.message.documentMessage as any).fileName || `document_${Date.now()}`;
+                mimeType = msg.message.documentMessage.mimetype || 'application/octet-stream';
+                const buffer = await downloadMediaMessage(msg, 'buffer', {});
+                mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+              } else if (messageType === 'sticker' && msg.message?.stickerMessage) {
+                fileName = `sticker_${Date.now()}.webp`;
+                mimeType = msg.message.stickerMessage.mimetype || 'image/webp';
+                const buffer = await downloadMediaMessage(msg, 'buffer', {});
+                mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+              }
+
+              if (mediaUrl) {
+                console.log(`[${clientId}] 📎 Media uploaded: ${mediaUrl}`);
+              }
+            } catch (mediaError) {
+              console.error(`[${clientId}] ❌ Error downloading/uploading media:`, mediaError);
+            }
+
+            // Intentar obtener foto de perfil del contacto
+            let profilePicUrl: string | undefined = undefined;
+            try {
+              if (remoteJid && !fromMe) {
+                // Para chats individuales, usar el JID del remitente
+                // Para grupos, usar el JID del grupo
+                const picJid = remoteJid;
+                profilePicUrl = await sock.profilePictureUrl(picJid, 'image');
+                console.log(`[${clientId}] 📸 Profile pic obtained for ${picJid}`);
+              }
+            } catch (picError) {
+              // No hay foto de perfil o error al obtenerla
+              console.log(`[${clientId}] ⚠️ No profile pic for ${remoteJid}`);
+            }
+
+            const savedMessage = {
+              instance_id: clientId,
+              chat_id: remoteJid || '',
+              message_id: messageId || '',
+              sender_name: senderName,
+              sender_phone: senderPhone,
+              message_text: messageText,
+              message_caption: undefined, // Ya incluido en messageText
+              message_type: messageType,
+              media_url: mediaUrl,
+              from_me: fromMe || false,
+              timestamp: new Date(msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now()),
+              is_read: fromMe || false,
+              metadata: { ...msg, fileName },
+              profile_pic_url: profilePicUrl,
+            };
+
+            await messageService.saveMessage(savedMessage);
+
+            console.log(`[${clientId}] ✅ Message saved to database`);
+
+            // 💾 Guardar/actualizar contacto automáticamente
+            if (!fromMe && remoteJid && !remoteJid.includes('@g.us')) {
+              try {
+                await contactService.saveContact({
+                  instance_id: clientId,
+                  jid: remoteJid,
+                  name: senderName,
+                  push_name: senderName,
+                  profile_pic_url: profilePicUrl,
+                  is_blocked: false,
+                });
+                console.log(`[${clientId}] 💾 Contact saved/updated: ${remoteJid}`);
+              } catch (contactError) {
+                console.error(`[${clientId}] ⚠️ Error saving contact:`, contactError);
+              }
+            }
+
+            // 🔌 Emitir evento WebSocket para actualización en tiempo real
+            try {
+              wsService.emitNewMessage(clientId, {
+                ...savedMessage,
+                instanceId: clientId,
+                chatId: remoteJid,
+                sender: senderName || senderPhone,
+                text: messageText,
+                type: messageType,
+                hasMedia: !!mediaUrl,
+                mediaUrl: mediaUrl,
+              });
+              console.log(`[${clientId}] 🔌 WebSocket event emitted`);
+            } catch (wsError) {
+              console.error(`[${clientId}] ⚠️ Error emitting WebSocket event:`, wsError);
+            }
+          } catch (dbError) {
+            console.error(`[${clientId}] ❌ Error saving message to DB:`, dbError);
+          }
+        } // ✅ End of if (instanceExists)
 
         // 🔀 LÓGICA DE WEBHOOK: Priorizar webhook_url personalizado (N8N) o usar FRONTEND_URL (Templates)
         let webhookUrl: string | null = null;
