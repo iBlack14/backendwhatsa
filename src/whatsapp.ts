@@ -47,7 +47,9 @@ async function uploadMediaToSupabase(
       });
 
     if (error) {
-      console.error('Error uploading to Supabase:', error);
+      console.error(`❌ STORAGE ERROR: No se pudo subir media al bucket 'whatsapp-media'`);
+      console.error(`   → Verifica que el bucket exista en Supabase Storage`);
+      console.error(`   → Error: ${error.message || error}`);
       return undefined;
     }
 
@@ -410,7 +412,7 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
           .single();
 
         if (!instanceExists) {
-          console.log(`[${clientId}] ⚠️ Instance not found in database, skipping message save (session exists but instance row missing)`);
+          console.log(`[${clientId}] ⚠️ SKIP: Sesión existe pero instancia no registrada en DB (crear instancia primero)`);
           // Continuar con el webhook pero no guardar en DB
         }
 

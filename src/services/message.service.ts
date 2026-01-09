@@ -81,7 +81,15 @@ export class MessageService {
         });
 
       if (error) {
-        console.error('Error saving message:', error);
+        // Mensaje de error más claro según el tipo de error
+        if (error.code === '23505') {
+          console.log(`⚠️ DUPLICADO: Mensaje ${message.message_id} ya existe (ignorado)`);
+        } else if (error.code === '23503') {
+          console.error(`❌ FK ERROR: instance_id '${message.instance_id}' no existe en tabla instances`);
+          console.error(`   → Primero crea la instancia en el dashboard antes de recibir mensajes`);
+        } else {
+          console.error(`❌ DB ERROR al guardar mensaje: ${error.message}`);
+        }
         return false;
       }
 
