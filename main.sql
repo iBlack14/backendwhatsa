@@ -2250,5 +2250,41 @@ CREATE POLICY "Users can delete own chatbots"
   );
 
 -- =====================================================
+-- STORAGE: BUCKET PARA MEDIA DE WHATSAPP
+-- =====================================================
+-- Crear bucket para almacenar imágenes, videos, audios, stickers, documentos
+
+-- Insertar el bucket si no existe
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'whatsapp-media',
+  'whatsapp-media',
+  true,  -- Bucket público para que las URLs sean accesibles
+  52428800,  -- 50MB límite por archivo
+  ARRAY['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'video/mp4', 'video/webm', 'audio/mpeg', 'audio/ogg', 'audio/wav', 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+)
+ON CONFLICT (id) DO UPDATE SET
+  public = true,
+  file_size_limit = 52428800;
+
+-- Política para permitir lectura pública (para que las URLs funcionen)
+DROP POLICY IF EXISTS "Public read access" ON storage.objects;
+CREATE POLICY "Public read access"
+  ON storage.objects FOR SELECT
+  USING (bucket_id = 'whatsapp-media');
+
+-- Política para permitir que el servicio suba archivos
+DROP POLICY IF EXISTS "Service upload access" ON storage.objects;
+CREATE POLICY "Service upload access"
+  ON storage.objects FOR INSERT
+  WITH CHECK (bucket_id = 'whatsapp-media');
+
+-- Política para permitir que el servicio elimine archivos
+DROP POLICY IF EXISTS "Service delete access" ON storage.objects;
+CREATE POLICY "Service delete access"
+  ON storage.objects FOR DELETE
+  USING (bucket_id = 'whatsapp-media');
+
+-- =====================================================
 -- FIN DEL SCHEMA
 -- =====================================================
