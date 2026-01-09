@@ -451,12 +451,14 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
                 mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
               } else if (messageType === 'audio' && msg.message?.audioMessage) {
                 fileName = `audio_${Date.now()}.mp3`;
-                mimeType = msg.message.audioMessage.mimetype || 'audio/mpeg';
+                // Simplificar MIME type - Supabase no acepta 'audio/ogg; codecs=opus'
+                mimeType = 'audio/mpeg';
                 const buffer = await downloadMediaMessage(msg, 'buffer', {});
                 mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
               } else if (messageType === 'voice' && msg.message?.audioMessage) {
                 fileName = `voice_${Date.now()}.ogg`;
-                mimeType = msg.message.audioMessage.mimetype || 'audio/ogg';
+                // Simplificar MIME type - Supabase no acepta 'audio/ogg; codecs=opus'
+                mimeType = 'audio/ogg';
                 const buffer = await downloadMediaMessage(msg, 'buffer', {});
                 mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
               } else if (messageType === 'document' && msg.message?.documentMessage) {
