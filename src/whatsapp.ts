@@ -66,6 +66,54 @@ async function uploadMediaToSupabase(
 }
 
 /**
+ * Normalizar LID a JID de teléfono usando el mapeo guardado en whatsapp_sessions
+ * Los LIDs tienen formato "número@lid" y necesitan convertirse a "número@s.whatsapp.net"
+ */
+async function normalizeChatId(instanceId: string, remoteJid: string): Promise<string> {
+  // Si no es un LID, devolver sin cambios
+  if (!remoteJid.endsWith('@lid')) {
+    return remoteJid;
+  }
+
+  try {
+    // Buscar el mapeo inverso (lid-mapping-PHONE_reverse tiene el LID como valor)
+    const lidNumber = remoteJid.split('@')[0];
+
+    // Buscar en whatsapp_sessions si hay un mapeo lid-mapping que tenga este LID
+    const { data: mappings } = await supabase
+      .from('whatsapp_sessions')
+      .select('key, value')
+      .eq('session_id', instanceId)
+      .like('key', 'lid-mapping-%_reverse');
+
+    if (mappings) {
+      for (const mapping of mappings) {
+        // El value es el número de teléfono, el key contiene el LID
+        try {
+          const phoneNumber = JSON.parse(mapping.value);
+          // Extraer el número del key (lid-mapping-LID_reverse -> LID)
+          const keyLid = mapping.key.replace('lid-mapping-', '').replace('_reverse', '');
+
+          if (keyLid === lidNumber) {
+            console.log(`[${instanceId}] 🔄 LID mapping: ${remoteJid} -> ${phoneNumber}@s.whatsapp.net`);
+            return `${phoneNumber}@s.whatsapp.net`;
+          }
+        } catch (e) {
+          // Ignorar errores de parsing
+        }
+      }
+    }
+
+    // Si no encontramos mapeo, devolver el LID original
+    console.log(`[${instanceId}] ⚠️ No LID mapping found for ${remoteJid}`);
+    return remoteJid;
+  } catch (error) {
+    console.error(`Error normalizing chat ID:`, error);
+    return remoteJid;
+  }
+}
+
+/**
  * Extraer texto completo del mensaje
  * @param message - Objeto de mensaje de Baileys
  * @returns Texto del mensaje o undefined
@@ -430,7 +478,10 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
 
             // Extraer nombre del contacto
             const senderName = msg.pushName || undefined;
-            const senderPhone = remoteJid?.split('@')[0] || undefined;
+
+            // ✅ Normalizar el chat_id para evitar duplicados con LIDs
+            const normalizedChatId = await normalizeChatId(clientId, remoteJid || '');
+            const senderPhone = normalizedChatId?.split('@')[0] || undefined;
 
             // Extraer información adicional según el tipo
             let mediaUrl = undefined;
@@ -497,7 +548,7 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
 
             const savedMessage = {
               instance_id: clientId,
-              chat_id: remoteJid || '',
+              chat_id: normalizedChatId || remoteJid || '',
               message_id: messageId || '',
               sender_name: senderName,
               sender_phone: senderPhone,
@@ -517,17 +568,17 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
             console.log(`[${clientId}] ✅ Message saved to database`);
 
             // 💾 Guardar/actualizar contacto automáticamente
-            if (!fromMe && remoteJid && !remoteJid.includes('@g.us')) {
+            if (!fromMe && normalizedChatId && !normalizedChatId.includes('@g.us')) {
               try {
                 await contactService.saveContact({
                   instance_id: clientId,
-                  jid: remoteJid,
+                  jid: normalizedChatId,
                   name: senderName,
                   push_name: senderName,
                   profile_pic_url: profilePicUrl,
                   is_blocked: false,
                 });
-                console.log(`[${clientId}] 💾 Contact saved/updated: ${remoteJid}`);
+                console.log(`[${clientId}] 💾 Contact saved/updated: ${normalizedChatId}`);
               } catch (contactError) {
                 console.error(`[${clientId}] ⚠️ Error saving contact:`, contactError);
               }
@@ -538,7 +589,7 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
               wsService.emitNewMessage(clientId, {
                 ...savedMessage,
                 instanceId: clientId,
-                chatId: remoteJid,
+                chatId: normalizedChatId || remoteJid,
                 sender: senderName || senderPhone,
                 text: messageText,
                 type: messageType,
