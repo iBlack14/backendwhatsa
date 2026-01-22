@@ -24,7 +24,7 @@ const getDockerConnection = () => {
 const docker = getDockerConnection();
 console.log('✅ Docker connection initialized for', process.platform);
 
-const BASE_DOMAIN = process.env.EASYPANEL_BASE_DOMAIN || process.env.BASE_DOMAIN || 'qn0goj.easypanel.host';
+const BASE_DOMAIN = process.env.EASYPANEL_BASE_DOMAIN || process.env.BASE_DOMAIN || 'ld4pxg.easypanel.host';
 const NETWORK_NAME = process.env.DOCKER_NETWORK || 'easypanel';
 
 interface CreateN8nInstanceParams {
@@ -83,7 +83,7 @@ export class DockerService {
           // Labels de Traefik para que el proxy inverso encuentre el contenedor
           'traefik.enable': 'true',
           [`traefik.http.routers.${serviceName}.rule`]: `Host(\`${serviceName}.${BASE_DOMAIN}\`)`,
-          [`traefik.http.routers.${serviceName}.entrypoints`]: 'https',
+          [`traefik.http.routers.${serviceName}.entrypoints`]: 'websecure',
           [`traefik.http.routers.${serviceName}.tls`]: 'true',
           [`traefik.http.routers.${serviceName}.tls.certresolver`]: 'letsencrypt',
           [`traefik.http.services.${serviceName}.loadbalancer.server.port`]: '5678',
