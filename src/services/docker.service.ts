@@ -25,7 +25,7 @@ const docker = getDockerConnection();
 console.log('✅ Docker connection initialized for', process.platform);
 
 const BASE_DOMAIN = process.env.EASYPANEL_BASE_DOMAIN || process.env.BASE_DOMAIN || 'ld4pxg.easypanel.host';
-const NETWORK_NAME = process.env.DOCKER_NETWORK || 'easypanel';
+const NETWORK_NAME = process.env.DOCKER_NETWORK || 'easypanel-blxk';
 
 interface CreateN8nInstanceParams {
   serviceName: string;
@@ -86,12 +86,12 @@ export class DockerService {
         Labels: {
           'traefik.enable': 'true',
           [`traefik.http.routers.${traefikId}.rule`]: `Host("${serviceName}.${BASE_DOMAIN}")`,
-          [`traefik.http.routers.${traefikId}.entrypoints`]: 'web,websecure',
+          [`traefik.http.routers.${traefikId}.entrypoints`]: 'websecure',
           [`traefik.http.routers.${traefikId}.tls`]: 'true',
           [`traefik.http.routers.${traefikId}.tls.certresolver`]: 'letsencrypt',
           [`traefik.http.routers.${traefikId}.service`]: traefikId,
           [`traefik.http.services.${traefikId}.loadbalancer.server.port`]: '5678',
-          'traefik.docker.network': 'easypanel',
+          'traefik.docker.network': 'easypanel-blxk',
           'easypanel.managed': 'true',
           'easypanel.project': 'wasapi',
           'easypanel.service': serviceName,
@@ -105,7 +105,7 @@ export class DockerService {
         },
         NetworkingConfig: {
           EndpointsConfig: {
-            'easypanel': {}
+            'easypanel-blxk': {}
           }
         },
       };
@@ -118,23 +118,6 @@ export class DockerService {
 
       // Iniciar contenedor
       await container.start();
-
-      // Conectar a la red adicional de Easypanel (la red principal ya está conectada en NetworkingConfig)
-      const additionalNetwork = 'easypanel-blxk';
-      try {
-        await this.ensureNetworkExists(additionalNetwork);
-        const network = docker.getNetwork(additionalNetwork);
-        await network.connect({
-          Container: container.id,
-        });
-        console.log(`[Docker] ✅ Connected to network: ${additionalNetwork}`);
-      } catch (netError: any) {
-        if (netError.statusCode === 409 || netError.statusCode === 403) {
-          console.log(`[Docker] ℹ️ Already connected to network: ${additionalNetwork}`);
-        } else {
-          console.warn(`[Docker] ⚠️ Could not connect to network ${additionalNetwork}:`, netError.message);
-        }
-      }
 
       // Obtener información del contenedor para el puerto
       const containerInfo = await container.inspect();
@@ -224,7 +207,7 @@ export class DockerService {
       }
 
       // Desconectar de las redes
-      const networks = [NETWORK_NAME, 'easypanel-blxk'];
+      const networks = [NETWORK_NAME];
       for (const networkName of networks) {
         try {
           const network = docker.getNetwork(networkName);
