@@ -69,10 +69,10 @@ export class DockerService {
           'N8N_USER_MANAGEMENT_DISABLED=false',
           'N8N_BASIC_AUTH_ACTIVE=false',
           `WEBHOOK_URL=https://${serviceName}.${BASE_DOMAIN}`,
-          // Variables críticas para que funcione detrás de proxy
+          `N8N_PROTOCOL=https`,
+          `N8N_HOST=${serviceName}.${BASE_DOMAIN}`,
           'N8N_TRUST_PROXY=true',
           'N8N_PORT=5678',
-          // Configuración para estabilidad
           'N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true',
           'DB_SQLITE_POOL_SIZE=3',
           'EXECUTIONS_DATA_PRUNE=true',
@@ -80,12 +80,13 @@ export class DockerService {
         ],
         Labels: {
           'traefik.enable': 'true',
-          // Usamos comillas dobles en la regla de Host para evitar errores de sintaxis
-          [`traefik.http.routers.${serviceName}.rule`]: `Host("${serviceName}.${BASE_DOMAIN}")`,
+          // Sintaxis exacta con acentos graves para Traefik
+          [`traefik.http.routers.${serviceName}.rule`]: `Host(\`${serviceName}.${BASE_DOMAIN}\`)`,
           [`traefik.http.routers.${serviceName}.entrypoints`]: 'web,websecure',
           [`traefik.http.routers.${serviceName}.tls`]: 'true',
           [`traefik.http.routers.${serviceName}.tls.certresolver`]: 'letsencrypt',
           [`traefik.http.services.${serviceName}.loadbalancer.server.port`]: '5678',
+          'traefik.docker.network': NETWORK_NAME,
           'easypanel.managed': 'true',
           'easypanel.project': 'wasapi',
           'service': serviceName,
