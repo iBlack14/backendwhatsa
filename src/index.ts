@@ -6,7 +6,8 @@ import cors from 'cors';
 import routes from './routes';
 import { restoreAllSessions } from './whatsapp';
 import { generalLimiter } from './middleware/rate-limit.middleware';
-import logger, { loggers } from './utils/logger';
+import { StructuredLogger, performanceTracker } from './utils/enhanced-logger';
+import { productionLoggingMiddleware } from './middleware/logging.middleware';
 import { wsService } from './websocket';
 
 const app = express();
@@ -30,7 +31,10 @@ app.use(cors({
     if (!origin || allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
     } else {
-      console.warn(`[CORS] ❌ Blocked request from unauthorized origin: ${origin}`);
+      StructuredLogger.securityEvent('cors_blocked', 'medium', {
+        origin,
+        userAgent: origin ? 'unknown' : 'no-origin'
+      });
       callback(new Error('Not allowed by CORS'));
     }
   },
@@ -45,21 +49,27 @@ app.use(express.urlencoded({ extended: true }));
 // Rate limiting general - DESHABILITADO para permitir envío/recepción ilimitada de mensajes
 // app.use('/api/', generalLimiter);
 
-// Logging middleware con Pino
-app.use((req, res, next) => {
-  loggers.apiRequest(req.method, req.path, req.ip);
-  next();
-});
+// Aplicar middleware de logging mejorado
+if (process.env.NODE_ENV === 'production') {
+  app.use(productionLoggingMiddleware);
+} else {
+  // En desarrollo usar logging simplificado
+  app.use((req, res, next) => {
+    StructuredLogger.httpRequest(req, res);
+    next();
+  });
+}
 
 // Routes
 app.use(routes);
 
-// Error handler con logger
+// Error handler con logger mejorado
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  loggers.apiError(req.method, req.path, err, 500);
+  StructuredLogger.httpError(req, err, 500);
   res.status(500).json({
     error: 'Internal Server Error',
-    message: err.message,
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Something went wrong',
+    requestId: req.id
   });
 });
 
@@ -70,46 +80,74 @@ wsService.initialize(httpServer);
 httpServer.listen(PORT, '0.0.0.0', async () => {
   const host = process.env.HOST || 'localhost';
 
-  logger.info('🚀 WhatsApp Backend Server started');
-  logger.info(`🌐 Running on: http://0.0.0.0:${PORT}`);
-  logger.info(`🌐 Local: http://localhost:${PORT}`);
-  logger.info(`🌐 Network: http://${host}:${PORT}`);
-  logger.info(`✅ Health check: http://${host}:${PORT}/health`);
-  logger.info(`🔌 WebSocket: ws://${host}:${PORT}/socket.io/`);
+  // Log de inicio mejorado
+  StructuredLogger.applicationStart(PORT, host);
 
-  logger.info('📋 Available endpoints:');
-  logger.info('   POST   /api/create-session');
-  logger.info('   POST   /api/generate-qr');
-  logger.info('   GET    /api/qr/:clientId');
-  logger.info('   GET    /api/profile/:documentId');
-  logger.info('   GET    /api/sessions');
-  logger.info('   POST   /api/send-message');
-  logger.info('   POST   /api/send-message/:clientId (N8N format)');
-  logger.info('   POST   /api/send-image/:clientId (N8N format)');
-  logger.info('   POST   /api/disconnect/:clientId');
-  logger.info('   POST   /api/disconnect-session/:documentId');
-  logger.info('   POST   /api/update-webhook/:clientId');
-  logger.info('   GET    /api/contacts/:instanceId');
-  logger.info('   GET    /api/contacts/search/:instanceId?q=');
-  logger.info('   POST   /api/messages/send');
+  // Log de endpoints disponibles
+  const endpoints = [
+    'POST   /api/create-session',
+    'POST   /api/generate-qr',
+    'GET    /api/qr/:clientId',
+    'GET    /api/profile/:documentId',
+    'GET    /api/sessions',
+    'POST   /api/send-message',
+    'POST   /api/send-message/:clientId (N8N format)',
+    'POST   /api/send-image/:clientId (N8N format)',
+    'POST   /api/disconnect/:clientId',
+    'POST   /api/disconnect-session/:documentId',
+    'POST   /api/update-webhook/:clientId',
+    'GET    /api/contacts/:instanceId',
+    'GET    /api/contacts/search/:instanceId?q=',
+    'POST   /api/messages/send'
+  ];
 
+  StructuredLogger.systemMetrics();
+  
   // Restaurar sesiones existentes
-  logger.info('🔄 Restoring WhatsApp Sessions...');
+  StructuredLogger.whatsappOperation('restore_sessions', 'system', {}, true);
   try {
+    performanceTracker.start('restore_all_sessions');
     await restoreAllSessions();
-    logger.info('✅ Sessions restored successfully');
+    const duration = performanceTracker.end('restore_all_sessions');
+    StructuredLogger.whatsappOperation('sessions_restored', 'system', { 
+      totalSessions: duration, 
+      success: true 
+    }, true);
   } catch (error: any) {
-    logger.error({ error: error.message }, '❌ Error restoring sessions');
+    StructuredLogger.whatsappOperation('sessions_restore_failed', 'system', { 
+      error: error.message 
+    }, false);
   }
 });
 
-// Graceful shutdown
-process.on('SIGINT', () => {
-  logger.info('🛑 Shutting down gracefully...');
-  process.exit(0);
+// Graceful shutdown mejorado
+const gracefulShutdown = (signal: string) => {
+  StructuredLogger.gracefulShutdown(signal);
+  
+  // Cerrar conexiones WebSocket
+  wsService.close();
+  
+  // Cerrar servidor HTTP
+  setTimeout(() => {
+    process.exit(0);
+  }, 5000);
+};
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+// Capturar errores no manejados
+process.on('uncaughtException', (error) => {
+  StructuredLogger.securityEvent('uncaught_exception', 'critical', {
+    error: error.message,
+    stack: error.stack
+  });
+  process.exit(1);
 });
 
-process.on('SIGTERM', () => {
-  logger.info('🛑 Shutting down gracefully...');
-  process.exit(0);
+process.on('unhandledRejection', (reason, promise) => {
+  StructuredLogger.securityEvent('unhandled_rejection', 'critical', {
+    reason: reason instanceof Error ? reason.message : reason,
+    promise: promise.toString()
+  });
 });
