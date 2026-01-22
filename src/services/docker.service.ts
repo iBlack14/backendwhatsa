@@ -61,6 +61,8 @@ export class DockerService {
       await this.ensureImageExists(imageName);
 
       const encryptionKey = process.env.N8N_ENCRYPTION_KEY || this.generatePassword();
+      const instanceUrl = `https://${serviceName}.${BASE_DOMAIN}`;
+
       const containerConfig: Docker.ContainerCreateOptions = {
         name: serviceName,
         Image: imageName,
@@ -68,7 +70,8 @@ export class DockerService {
           `N8N_ENCRYPTION_KEY=${encryptionKey}`,
           'N8N_USER_MANAGEMENT_DISABLED=false',
           'N8N_BASIC_AUTH_ACTIVE=false',
-          `WEBHOOK_URL=https://${serviceName}.${BASE_DOMAIN}`,
+          `WEBHOOK_URL=${instanceUrl}`,
+          `N8N_EDITOR_BASE_URL=${instanceUrl}`,
           `N8N_PROTOCOL=https`,
           `N8N_HOST=${serviceName}.${BASE_DOMAIN}`,
           'N8N_TRUST_PROXY=true',
@@ -80,12 +83,12 @@ export class DockerService {
         ],
         Labels: {
           'traefik.enable': 'true',
-          // Sintaxis exacta con acentos graves para Traefik
-          [`traefik.http.routers.${serviceName}.rule`]: `Host(\`${serviceName}.${BASE_DOMAIN}\`)`,
-          [`traefik.http.routers.${serviceName}.entrypoints`]: 'web,websecure',
-          [`traefik.http.routers.${serviceName}.tls`]: 'true',
-          [`traefik.http.routers.${serviceName}.tls.certresolver`]: 'letsencrypt',
-          [`traefik.http.services.${serviceName}.loadbalancer.server.port`]: '5678',
+          // Prefixing names with project (wasapi_) to match Easypanel conventions
+          [`traefik.http.routers.wasapi_${serviceName}.rule`]: `Host(\`${serviceName}.${BASE_DOMAIN}\`)`,
+          [`traefik.http.routers.wasapi_${serviceName}.entrypoints`]: 'web,websecure',
+          [`traefik.http.routers.wasapi_${serviceName}.tls`]: 'true',
+          [`traefik.http.routers.wasapi_${serviceName}.tls.certresolver`]: 'letsencrypt',
+          [`traefik.http.services.wasapi_${serviceName}.loadbalancer.server.port`]: '5678',
           'traefik.docker.network': NETWORK_NAME,
           'easypanel.managed': 'true',
           'easypanel.project': 'wasapi',
