@@ -60,60 +60,46 @@ export class DockerService {
       console.log(`[Docker] Checking image: ${imageName}`);
       await this.ensureImageExists(imageName);
 
+      const encryptionKey = process.env.N8N_ENCRYPTION_KEY || this.generatePassword();
       const containerConfig: Docker.ContainerCreateOptions = {
         name: serviceName,
         Image: imageName,
         Env: [
-          `N8N_ENCRYPTION_KEY=${process.env.N8N_ENCRYPTION_KEY || this.generatePassword()}`,
-          // Permitir que el usuario configure su propia cuenta en el setup inicial
+          `N8N_ENCRYPTION_KEY=${encryptionKey}`,
           'N8N_USER_MANAGEMENT_DISABLED=false',
-          // No usar autenticación básica - dejar que N8N maneje el setup
           'N8N_BASIC_AUTH_ACTIVE=false',
           `WEBHOOK_URL=https://${serviceName}.${BASE_DOMAIN}`,
+          // Variables críticas para que funcione detrás de proxy
+          'N8N_TRUST_PROXY=true',
+          'N8N_PORT=5678',
           // Configuración para estabilidad
           'N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true',
           'DB_SQLITE_POOL_SIZE=3',
           'EXECUTIONS_DATA_PRUNE=true',
           'EXECUTIONS_DATA_MAX_AGE=168',
-          // Configuración de seguridad
-          'N8N_BLOCK_ENV_ACCESS_IN_NODE=false',
-          'N8N_GIT_NODE_DISABLE_BARE_REPOS=true',
         ],
         Labels: {
-          // Labels de Traefik para que el proxy inverso encuentre el contenedor
           'traefik.enable': 'true',
-          [`traefik.http.routers.${serviceName}.rule`]: `Host(\`${serviceName}.${BASE_DOMAIN}\`)`,
+          // Usamos comillas dobles en la regla de Host para evitar errores de sintaxis
+          [`traefik.http.routers.${serviceName}.rule`]: `Host("${serviceName}.${BASE_DOMAIN}")`,
           [`traefik.http.routers.${serviceName}.entrypoints`]: 'web,websecure',
           [`traefik.http.routers.${serviceName}.tls`]: 'true',
           [`traefik.http.routers.${serviceName}.tls.certresolver`]: 'letsencrypt',
           [`traefik.http.services.${serviceName}.loadbalancer.server.port`]: '5678',
-          [`traefik.http.services.${serviceName}.loadbalancer.server.scheme`]: 'http',
           'easypanel.managed': 'true',
           'easypanel.project': 'wasapi',
           'service': serviceName,
-          'managed_by': 'suite',
-          'traefik.docker.network': 'easypanel',
         },
         HostConfig: {
           Memory: this.parseMemory(memory),
-          NanoCpus: cpu * 1000000, // CPU en nanocores
-          RestartPolicy: {
-            Name: 'unless-stopped',
-          },
-          Binds: [
-            `${serviceName}-data:/home/node/.n8n`,
-          ],
-          PortBindings: {
-            '5678/tcp': [{ HostPort: '0' }] // Puerto aleatorio en desarrollo
-          }
+          NanoCpus: cpu * 1000000,
+          RestartPolicy: { Name: 'unless-stopped' },
+          Binds: [`${serviceName}-data:/home/node/.n8n`],
         },
         NetworkingConfig: {
           EndpointsConfig: {
             [NETWORK_NAME]: {}
           }
-        },
-        ExposedPorts: {
-          '5678/tcp': {},
         },
       };
 
