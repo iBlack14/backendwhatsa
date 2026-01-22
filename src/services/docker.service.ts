@@ -89,9 +89,10 @@ export class DockerService {
           [`traefik.http.services.${serviceName}.loadbalancer.server.port`]: '5678',
           [`traefik.http.services.${serviceName}.loadbalancer.server.scheme`]: 'http',
           'easypanel.managed': 'true',
-          'easypanel.project': 'blxk',
+          'easypanel.project': 'wasapi',
           'service': serviceName,
           'managed_by': 'suite',
+          'traefik.docker.network': 'easypanel',
         },
         HostConfig: {
           Memory: this.parseMemory(memory),
