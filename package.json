@@ -6,9 +6,7 @@
   "scripts": {
     "dev": "ts-node src/index.ts",
     "build": "tsc",
-    "start": "node dist/index.js",
-    "log:monitor": "ts-node scripts/simple-log-monitor.ts",
-    "log:validate": "ts-node -e \"import('./src/config/logging.config').then(m => m.validateLoggingConfig())\""
+    "start": "node dist/index.js"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",

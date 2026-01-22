@@ -126,15 +126,6 @@ export class WebSocketService {
   getIO(): SocketIOServer | null {
     return this.io;
   }
-
-  close(): void {
-    if (this.io) {
-      this.io.close();
-      this.io = null;
-      logger.info('🔌 WebSocket Server closed');
-    }
-    this.userSockets.clear();
-  }
 }
 
 export const wsService = new WebSocketService();
