@@ -128,6 +128,7 @@ export class DockerService {
       // Conectar a la red adicional de Easypanel (la red principal ya está conectada en NetworkingConfig)
       const additionalNetwork = 'easypanel-blxk';
       try {
+        await this.ensureNetworkExists(additionalNetwork);
         const network = docker.getNetwork(additionalNetwork);
         await network.connect({
           Container: container.id,
@@ -345,6 +346,29 @@ export class DockerService {
         });
       });
       console.log(`[Docker] Image ${imageName} pulled successfully`);
+    }
+  }
+
+  /**
+   * Asegurar que la red existe
+   */
+  private async ensureNetworkExists(networkName: string) {
+    try {
+      const network = docker.getNetwork(networkName);
+      await network.inspect();
+    } catch (error: any) {
+      console.log(`[Docker] Network ${networkName} not found, creating...`);
+      try {
+        await docker.createNetwork({
+          Name: networkName,
+          Driver: 'bridge',
+          Attachable: true,
+        });
+        console.log(`[Docker] Network ${networkName} created successfully`);
+      } catch (createError: any) {
+        console.error(`[Docker] ❌ Error creating network ${networkName}:`, createError.message);
+        throw createError;
+      }
     }
   }
 
