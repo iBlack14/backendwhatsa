@@ -1,7 +1,6 @@
 /**
- * Logger Profesional Mejorado para Backend BLXK
- * Sistema de logging estructurado con niveles, contextos y métricas
- * Optimizado para producción y desarrollo
+ * Logger Simplificado para Backend BLXK
+ * Sistema de logging básico sin errores de TypeScript
  */
 
 import pino, { Logger } from 'pino';
@@ -10,34 +9,9 @@ import { config } from 'dotenv';
 // Cargar variables de entorno
 config();
 
-// Niveles de log personalizados
-enum LogLevel {
-  SILENT = 'silent',
-  FATAL = 'fatal',
-  ERROR = 'error',
-  WARN = 'warn',
-  INFO = 'info',
-  DEBUG = 'debug',
-  TRACE = 'trace'
-}
-
-// Contextos de aplicación
-enum LogContext {
-  API = 'api',
-  WHATSAPP = 'whatsapp',
-  DATABASE = 'database',
-  DOCKER = 'docker',
-  WEBSOCKET = 'websocket',
-  AUTH = 'auth',
-  CRON = 'cron',
-  SYSTEM = 'system',
-  SECURITY = 'security',
-  PERFORMANCE = 'performance'
-}
-
 // Configuración base del logger
 const baseConfig = {
-  level: process.env.LOG_LEVEL || LogLevel.INFO,
+  level: process.env.LOG_LEVEL || 'info',
   formatters: {
     level: (label: string) => ({ level: label }),
     log: (object: any) => {
@@ -72,7 +46,7 @@ const devConfig = {
       customPrettifiers: {
         time: (timestamp: string) => `🕐 ${new Date(timestamp).toLocaleTimeString()}`,
         level: (label: string) => {
-          const levels = {
+          const levels: any = {
             fatal: '🔴 FATAL',
             error: '❌ ERROR', 
             warn: '⚠️  WARN',
@@ -90,8 +64,6 @@ const devConfig = {
 // Configuración para producción
 const prodConfig = {
   ...baseConfig,
-  // En producción usamos JSON structured logging
-  // para mejor integración con sistemas de monitoreo
   serializers: {
     req: pino.stdSerializers.req,
     res: pino.stdSerializers.res,
@@ -106,16 +78,16 @@ const logger: Logger = pino(
 
 // Logger específico para cada contexto
 const loggers = {
-  [LogContext.API]: logger.child({ context: LogContext.API }),
-  [LogContext.WHATSAPP]: logger.child({ context: LogContext.WHATSAPP }),
-  [LogContext.DATABASE]: logger.child({ context: LogContext.DATABASE }),
-  [LogContext.DOCKER]: logger.child({ context: LogContext.DOCKER }),
-  [LogContext.WEBSOCKET]: logger.child({ context: LogContext.WEBSOCKET }),
-  [LogContext.AUTH]: logger.child({ context: LogContext.AUTH }),
-  [LogContext.CRON]: logger.child({ context: LogContext.CRON }),
-  [LogContext.SYSTEM]: logger.child({ context: LogContext.SYSTEM }),
-  [LogContext.SECURITY]: logger.child({ context: LogContext.SECURITY }),
-  [LogContext.PERFORMANCE]: logger.child({ context: LogContext.PERFORMANCE })
+  api: logger.child({ context: 'api' }),
+  whatsapp: logger.child({ context: 'whatsapp' }),
+  database: logger.child({ context: 'database' }),
+  docker: logger.child({ context: 'docker' }),
+  websocket: logger.child({ context: 'websocket' }),
+  auth: logger.child({ context: 'auth' }),
+  cron: logger.child({ context: 'cron' }),
+  system: logger.child({ context: 'system' }),
+  security: logger.child({ context: 'security' }),
+  performance: logger.child({ context: 'performance' })
 };
 
 // Métricas de rendimiento
@@ -129,14 +101,14 @@ class PerformanceTracker {
   end(label: string): number {
     const startTime = this.timers.get(label);
     if (!startTime) {
-      loggers[LogContext.PERFORMANCE].warn({ label }, 'Timer not found');
+      loggers.performance.warn({ label }, 'Timer not found');
       return 0;
     }
 
     const duration = Date.now() - startTime;
     this.timers.delete(label);
     
-    loggers[LogContext.PERFORMANCE].info({ 
+    loggers.performance.info({ 
       label, 
       duration,
       durationMs: duration 
@@ -145,13 +117,12 @@ class PerformanceTracker {
     return duration;
   }
 
-  // Decorador para medir tiempo de ejecución de funciones
   timer(label: string) {
     return (target: any, propertyName: string, descriptor: PropertyDescriptor) => {
       const method = descriptor.value;
       descriptor.value = async function (...args: any[]) {
         const timerLabel = `${label || propertyName}`;
-        loggers[LogContext.PERFORMANCE].debug({ 
+        loggers.performance.debug({ 
           method: propertyName, 
           args: args.length 
         }, 'Method execution started');
@@ -161,17 +132,17 @@ class PerformanceTracker {
           const result = await method.apply(this, args);
           const duration = Date.now() - start;
           
-          loggers[LogContext.PERFORMANCE].info({ 
+          loggers.performance.info({ 
             method: propertyName, 
             duration,
             success: true 
           }, 'Method execution completed');
           
           return result;
-        } catch (error) {
+        } catch (error: any) {
           const duration = Date.now() - start;
           
-          loggers[LogContext.PERFORMANCE].error({ 
+          loggers.performance.error({ 
             method: propertyName, 
             duration, 
             error: error.message,
@@ -189,12 +160,9 @@ class PerformanceTracker {
 const performanceTracker = new PerformanceTracker();
 
 // Sistema de logging estructurado
-export class StructuredLogger {
-  /**
-   * Log de inicio de aplicación
-   */
+class StructuredLogger {
   static applicationStart(port: number, host: string): void {
-    loggers[LogContext.SYSTEM].info({
+    loggers.system.info({
       event: 'application_start',
       port,
       host,
@@ -205,22 +173,15 @@ export class StructuredLogger {
     }, '🚀 BLXK Backend Server started');
   }
 
-  /**
-   * Log de shutdown graceful
-   */
   static gracefulShutdown(signal: string): void {
-    loggers[LogContext.SYSTEM].info({
+    loggers.system.info({
       event: 'graceful_shutdown',
       signal,
       uptime: process.uptime()
     }, '🛑 Shutting down gracefully...');
   }
 
-  /**
-   * Log de request HTTP
-   */
   static httpRequest(req: any, res: any, duration?: number): void {
-    const context = LogContext.API;
     const logData = {
       method: req.method,
       url: req.url,
@@ -232,17 +193,14 @@ export class StructuredLogger {
     };
 
     if (res.statusCode >= 400) {
-      loggers[context].warn(logData, 'HTTP Request completed with warning');
+      loggers.api.warn(logData, 'HTTP Request completed with warning');
     } else {
-      loggers[context].info(logData, 'HTTP Request completed');
+      loggers.api.info(logData, 'HTTP Request completed');
     }
   }
 
-  /**
-   * Log de error HTTP
-   */
   static httpError(req: any, error: Error, statusCode: number = 500): void {
-    loggers[LogContext.API].error({
+    loggers.api.error({
       method: req.method,
       url: req.url,
       userAgent: req.get('user-agent'),
@@ -253,9 +211,6 @@ export class StructuredLogger {
     }, 'HTTP Request failed');
   }
 
-  /**
-   * Log de operación WhatsApp
-   */
   static whatsappOperation(
     operation: string, 
     clientId: string, 
@@ -269,12 +224,9 @@ export class StructuredLogger {
       ...details
     };
 
-    loggers[LogContext.WHATSAPP][level](logData, `WhatsApp ${operation}`);
+    loggers.whatsapp[level](logData, `WhatsApp ${operation}`);
   }
 
-  /**
-   * Log de mensaje WhatsApp
-   */
   static whatsappMessage(
     type: 'sent' | 'received',
     clientId: string,
@@ -283,7 +235,7 @@ export class StructuredLogger {
     from?: string,
     messageType?: string
   ): void {
-    loggers[LogContext.WHATSAPP].info({
+    loggers.whatsapp.info({
       event: `message_${type}`,
       clientId,
       messageId,
@@ -293,24 +245,18 @@ export class StructuredLogger {
     }, `WhatsApp message ${type}`);
   }
 
-  /**
-   * Log de conexión/desconexión WhatsApp
-   */
   static whatsappConnection(
     event: 'connecting' | 'connected' | 'disconnected' | 'reconnecting',
     clientId: string,
     details?: any
   ): void {
-    loggers[LogContext.WHATSAPP].info({
+    loggers.whatsapp.info({
       event: `connection_${event}`,
       clientId,
       ...details
     }, `WhatsApp ${event}`);
   }
 
-  /**
-   * Log de operación de base de datos
-   */
   static databaseOperation(
     operation: string,
     table: string,
@@ -326,12 +272,9 @@ export class StructuredLogger {
       ...(error && { error: error.message, stack: error.stack })
     };
 
-    loggers[LogContext.DATABASE][level](logData, `Database ${operation}`);
+    loggers.database[level](logData, `Database ${operation}`);
   }
 
-  /**
-   * Log de operación Docker
-   */
   static dockerOperation(
     operation: string,
     containerName?: string,
@@ -345,19 +288,16 @@ export class StructuredLogger {
       ...details
     };
 
-    loggers[LogContext.DOCKER][level](logData, `Docker ${operation}`);
+    loggers.docker[level](logData, `Docker ${operation}`);
   }
 
-  /**
-   * Log de evento WebSocket
-   */
   static websocketEvent(
     event: string,
     socketId?: string,
     userId?: string,
     details?: any
   ): void {
-    loggers[LogContext.WEBSOCKET].info({
+    loggers.websocket.info({
       event,
       socketId,
       userId,
@@ -365,16 +305,13 @@ export class StructuredLogger {
     }, `WebSocket ${event}`);
   }
 
-  /**
-   * Log de evento de autenticación
-   */
   static authEvent(
     event: 'login' | 'logout' | 'register' | 'failed_login',
     userId?: string,
     email?: string,
     details?: any
   ): void {
-    loggers[LogContext.AUTH].info({
+    loggers.auth.info({
       event,
       userId,
       email,
@@ -382,29 +319,22 @@ export class StructuredLogger {
     }, `Authentication ${event}`);
   }
 
-  /**
-   * Log de evento de seguridad
-   */
   static securityEvent(
     event: string,
     severity: 'low' | 'medium' | 'high' | 'critical',
     details?: any
   ): void {
-    loggers[LogContext.SECURITY].warn({
+    loggers.security.warn({
       event,
       severity,
       ...details
     }, `Security event: ${event}`);
   }
 
-  /**
-   * Log de métricas de sistema
-   */
   static systemMetrics(): void {
     const memUsage = process.memoryUsage();
-    const cpuUsage = process.cpuUsage();
     
-    loggers[LogContext.SYSTEM].info({
+    loggers.system.info({
       event: 'system_metrics',
       memory: {
         rss: memUsage.rss,
@@ -413,17 +343,11 @@ export class StructuredLogger {
         external: memUsage.external,
         arrayBuffers: memUsage.arrayBuffers
       },
-      cpu: {
-        user: cpuUsage.user,
-        system: cpuUsage.system
-      },
+      cpu: process.cpuUsage(),
       uptime: process.uptime()
     }, 'System metrics');
   }
 
-  /**
-   * Log de webhook enviado
-   */
   static webhookSent(
     url: string,
     event: string,
@@ -439,19 +363,16 @@ export class StructuredLogger {
       ...(error && { error: error.message })
     };
 
-    loggers[LogContext.API][level](logData, `Webhook ${event} ${success ? 'sent' : 'failed'}`);
+    loggers.api[level](logData, `Webhook ${event} ${success ? 'sent' : 'failed'}`);
   }
 
-  /**
-   * Log de rate limit
-   */
   static rateLimitExceeded(
     ip: string,
     endpoint: string,
     limit: number,
     windowMs: number
   ): void {
-    loggers[LogContext.SECURITY].warn({
+    loggers.security.warn({
       event: 'rate_limit_exceeded',
       ip,
       endpoint,
@@ -461,14 +382,5 @@ export class StructuredLogger {
   }
 }
 
-// Exportaciones
-export {
-  logger,
-  loggers,
-  StructuredLogger,
-  performanceTracker,
-  LogLevel,
-  LogContext
-};
-
 export default logger;
+export { logger, loggers, StructuredLogger, performanceTracker };
