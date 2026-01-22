@@ -428,38 +428,38 @@ ALTER TABLE public.user_subscriptions ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
 CREATE POLICY "Users can view own profile" 
   ON public.profiles FOR SELECT 
-  USING (auth.uid() = id);
+  USING ((select auth.uid()) = id);
 
 DROP POLICY IF EXISTS "Users can update own profile" ON public.profiles;
 CREATE POLICY "Users can update own profile" 
   ON public.profiles FOR UPDATE 
-  USING (auth.uid() = id);
+  USING ((select auth.uid()) = id);
 
 DROP POLICY IF EXISTS "Users can insert own profile" ON public.profiles;
 CREATE POLICY "Users can insert own profile" 
   ON public.profiles FOR INSERT 
-  WITH CHECK (auth.uid() = id);
+  WITH CHECK ((select auth.uid()) = id);
 
 -- Políticas para instances
 DROP POLICY IF EXISTS "Users can view own instances" ON public.instances;
 CREATE POLICY "Users can view own instances" 
   ON public.instances FOR SELECT 
-  USING (auth.uid() = user_id);
+  USING ((select auth.uid()) = user_id);
 
 DROP POLICY IF EXISTS "Users can insert own instances" ON public.instances;
 CREATE POLICY "Users can insert own instances" 
   ON public.instances FOR INSERT 
-  WITH CHECK (auth.uid() = user_id);
+  WITH CHECK ((select auth.uid()) = user_id);
 
 DROP POLICY IF EXISTS "Users can update own instances" ON public.instances;
 CREATE POLICY "Users can update own instances" 
   ON public.instances FOR UPDATE 
-  USING (auth.uid() = user_id);
+  USING ((select auth.uid()) = user_id);
 
 DROP POLICY IF EXISTS "Users can delete own instances" ON public.instances;
 CREATE POLICY "Users can delete own instances" 
   ON public.instances FOR DELETE 
-  USING (auth.uid() = user_id);
+  USING ((select auth.uid()) = user_id);
 
 
 -- Políticas para contacts
@@ -468,7 +468,7 @@ CREATE POLICY "Users can view own contacts"
   ON public.contacts FOR SELECT
   USING (
     instance_id IN (
-      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+      SELECT document_id FROM public.instances WHERE user_id = (select auth.uid())
     )
   );
 
@@ -477,7 +477,7 @@ CREATE POLICY "Users can insert own contacts"
   ON public.contacts FOR INSERT
   WITH CHECK (
     instance_id IN (
-      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+      SELECT document_id FROM public.instances WHERE user_id = (select auth.uid())
     )
   );
 
@@ -486,7 +486,7 @@ CREATE POLICY "Users can update own contacts"
   ON public.contacts FOR UPDATE
   USING (
     instance_id IN (
-      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+      SELECT document_id FROM public.instances WHERE user_id = (select auth.uid())
     )
   );
 
@@ -495,7 +495,7 @@ CREATE POLICY "Users can delete own contacts"
   ON public.contacts FOR DELETE
   USING (
     instance_id IN (
-      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+      SELECT document_id FROM public.instances WHERE user_id = (select auth.uid())
     )
   );
 
@@ -505,7 +505,7 @@ CREATE POLICY "Users can view their own messages"
   ON public.messages FOR SELECT
   USING (
     instance_id IN (
-      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+      SELECT document_id FROM public.instances WHERE user_id = (select auth.uid())
     )
   );
 
@@ -514,7 +514,7 @@ CREATE POLICY "Users can insert messages to their instances"
   ON public.messages FOR INSERT
   WITH CHECK (
     instance_id IN (
-      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+      SELECT document_id FROM public.instances WHERE user_id = (select auth.uid())
     )
   );
 
@@ -523,7 +523,7 @@ CREATE POLICY "Users can update their own messages"
   ON public.messages FOR UPDATE
   USING (
     instance_id IN (
-      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+      SELECT document_id FROM public.instances WHERE user_id = (select auth.uid())
     )
   );
 
@@ -532,7 +532,7 @@ CREATE POLICY "Users can delete their own messages"
   ON public.messages FOR DELETE
   USING (
     instance_id IN (
-      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+      SELECT document_id FROM public.instances WHERE user_id = (select auth.uid())
     )
   );
 
@@ -540,38 +540,38 @@ CREATE POLICY "Users can delete their own messages"
 DROP POLICY IF EXISTS "Users can view own suites" ON public.suites;
 CREATE POLICY "Users can view own suites" 
   ON public.suites FOR SELECT 
-  USING (auth.uid() = user_id);
+  USING ((select auth.uid()) = user_id);
 
 DROP POLICY IF EXISTS "Users can insert own suites" ON public.suites;
 CREATE POLICY "Users can insert own suites" 
   ON public.suites FOR INSERT 
-  WITH CHECK (auth.uid() = user_id);
+  WITH CHECK ((select auth.uid()) = user_id);
 
 DROP POLICY IF EXISTS "Users can update own suites" ON public.suites;
 CREATE POLICY "Users can update own suites" 
   ON public.suites FOR UPDATE 
-  USING (auth.uid() = user_id);
+  USING ((select auth.uid()) = user_id);
 
 DROP POLICY IF EXISTS "Users can delete own suites" ON public.suites;
 CREATE POLICY "Users can delete own suites" 
   ON public.suites FOR DELETE 
-  USING (auth.uid() = user_id);
+  USING ((select auth.uid()) = user_id);
 
 -- Políticas para spam_progress
 DROP POLICY IF EXISTS "Users can view own spam progress" ON public.spam_progress;
 CREATE POLICY "Users can view own spam progress" 
   ON public.spam_progress FOR SELECT 
-  USING (auth.uid()::text = user_id);
+  USING ((select auth.uid())::text = user_id);
 
 DROP POLICY IF EXISTS "Users can insert own spam progress" ON public.spam_progress;
 CREATE POLICY "Users can insert own spam progress" 
   ON public.spam_progress FOR INSERT 
-  WITH CHECK (auth.uid()::text = user_id);
+  WITH CHECK ((select auth.uid())::text = user_id);
 
 DROP POLICY IF EXISTS "Users can update own spam progress" ON public.spam_progress;
 CREATE POLICY "Users can update own spam progress" 
   ON public.spam_progress FOR UPDATE 
-  USING (auth.uid()::text = user_id);
+  USING ((select auth.uid())::text = user_id);
 
 -- Políticas para products (todos pueden ver)
 DROP POLICY IF EXISTS "Anyone can view products" ON public.products;
@@ -589,17 +589,17 @@ CREATE POLICY "Anyone can view plans"
 DROP POLICY IF EXISTS "Users can view own subscriptions" ON public.user_subscriptions;
 CREATE POLICY "Users can view own subscriptions" 
   ON public.user_subscriptions FOR SELECT 
-  USING (auth.uid() = user_id);
+  USING ((select auth.uid()) = user_id);
 
 DROP POLICY IF EXISTS "Users can insert own subscriptions" ON public.user_subscriptions;
 CREATE POLICY "Users can insert own subscriptions" 
   ON public.user_subscriptions FOR INSERT 
-  WITH CHECK (auth.uid() = user_id);
+  WITH CHECK ((select auth.uid()) = user_id);
 
 DROP POLICY IF EXISTS "Users can update own subscriptions" ON public.user_subscriptions;
 CREATE POLICY "Users can update own subscriptions" 
   ON public.user_subscriptions FOR UPDATE 
-  USING (auth.uid() = user_id);
+  USING ((select auth.uid()) = user_id);
 
 -- =====================================================
 -- 6. VISTAS
@@ -886,16 +886,11 @@ DROP POLICY IF EXISTS "Service role can manage proxies" ON public.proxies;
 DROP POLICY IF EXISTS "Users can view own proxies" ON public.proxies;
 DROP POLICY IF EXISTS "Users can manage own proxies" ON public.proxies;
 
--- ✅ Usuarios solo ven sus propios proxies
-CREATE POLICY "Users can view own proxies"
-  ON public.proxies FOR SELECT
-  USING (auth.uid() = user_id);
-
--- ✅ Usuarios solo pueden crear/editar/eliminar sus propios proxies
+-- Combined policy for all operations on own proxies
 CREATE POLICY "Users can manage own proxies"
   ON public.proxies FOR ALL
-  USING (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);
+  USING ((select auth.uid()) = user_id)
+  WITH CHECK ((select auth.uid()) = user_id);
 
 -- Políticas para instance_proxies (usuarios ven sus propias instancias)
 DROP POLICY IF EXISTS "Users can view their instance proxies" ON public.instance_proxies;
@@ -903,7 +898,7 @@ CREATE POLICY "Users can view their instance proxies"
   ON public.instance_proxies FOR SELECT
   USING (
     instance_id IN (
-      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+      SELECT document_id FROM public.instances WHERE user_id = (select auth.uid())
     )
   );
 
@@ -912,7 +907,7 @@ CREATE POLICY "Users can update their instance proxies"
   ON public.instance_proxies FOR UPDATE
   USING (
     instance_id IN (
-      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+      SELECT document_id FROM public.instances WHERE user_id = (select auth.uid())
     )
   );
 
@@ -922,7 +917,7 @@ CREATE POLICY "Users can view their chats"
   ON public.chats FOR SELECT
   USING (
     instance_id IN (
-      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+      SELECT document_id FROM public.instances WHERE user_id = (select auth.uid())
     )
   );
 
@@ -931,7 +926,7 @@ CREATE POLICY "Users can update their chats"
   ON public.chats FOR UPDATE
   USING (
     instance_id IN (
-      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+      SELECT document_id FROM public.instances WHERE user_id = (select auth.uid())
     )
   );
 
@@ -1165,7 +1160,7 @@ CREATE POLICY "Anyone can view plan limits"
 DROP POLICY IF EXISTS "Users can view own usage" ON public.daily_usage;
 CREATE POLICY "Users can view own usage"
   ON public.daily_usage FOR SELECT
-  USING (auth.uid() = user_id);
+  USING ((select auth.uid()) = user_id);
 
 -- Función para incrementar uso diario
 CREATE OR REPLACE FUNCTION increment_daily_usage(
@@ -1359,22 +1354,20 @@ ALTER TABLE public.chatbots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chatbot_logs ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Users can view own chatbots" ON public.chatbots;
-CREATE POLICY "Users can view own chatbots"
-  ON public.chatbots FOR SELECT
-  USING (auth.uid() = user_id);
-
 DROP POLICY IF EXISTS "Users can manage own chatbots" ON public.chatbots;
+
+-- Combined policy for all operations on own chatbots
 CREATE POLICY "Users can manage own chatbots"
   ON public.chatbots FOR ALL
-  USING (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);
+  USING ((select auth.uid()) = user_id)
+  WITH CHECK ((select auth.uid()) = user_id);
 
 DROP POLICY IF EXISTS "Users can view own chatbot logs" ON public.chatbot_logs;
 CREATE POLICY "Users can view own chatbot logs"
   ON public.chatbot_logs FOR SELECT
   USING (
     chatbot_id IN (
-      SELECT id FROM public.chatbots WHERE user_id = auth.uid()
+      SELECT id FROM public.chatbots WHERE user_id = (select auth.uid())
     )
   );
 
@@ -1596,20 +1589,18 @@ ALTER TABLE public.rate_limits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.rate_limits_ip ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Users can view own counters" ON public.anti_ban_counters;
-CREATE POLICY "Users can view own counters"
-  ON public.anti_ban_counters FOR SELECT
-  USING (auth.uid() = user_id);
-
 DROP POLICY IF EXISTS "Users can manage own counters" ON public.anti_ban_counters;
-CREATE POLICY "Users can manage own counters"
-  ON public.anti_ban_counters FOR ALL
-  USING (auth.uid() = user_id)
-  WITH CHECK (auth.uid() = user_id);
+
+-- Combined policy for all operations on own counters
+CREATE POLICY "Users can manage own counters" 
+  ON public.anti_ban_counters FOR ALL 
+  USING ((select auth.uid()) = user_id)
+  WITH CHECK ((select auth.uid()) = user_id);
 
 DROP POLICY IF EXISTS "Users can view own rate limits" ON public.rate_limits;
 CREATE POLICY "Users can view own rate limits"
   ON public.rate_limits FOR SELECT
-  USING (auth.uid() = user_id);
+  USING ((select auth.uid()) = user_id);
 
 -- Triggers para updated_at
 DROP TRIGGER IF EXISTS update_anti_ban_counters_updated_at ON public.anti_ban_counters;
@@ -1956,7 +1947,7 @@ ALTER TABLE public.api_key_usage ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Users can view own API usage" ON public.api_key_usage;
 CREATE POLICY "Users can view own API usage"
   ON public.api_key_usage FOR SELECT
-  USING (auth.uid() = user_id);
+  USING ((select auth.uid()) = user_id);
 
 -- RLS para api_key_history
 ALTER TABLE public.api_key_history ENABLE ROW LEVEL SECURITY;
@@ -1964,7 +1955,7 @@ ALTER TABLE public.api_key_history ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Users can view own API key history" ON public.api_key_history;
 CREATE POLICY "Users can view own API key history"
   ON public.api_key_history FOR SELECT
-  USING (auth.uid() = user_id);
+  USING ((select auth.uid()) = user_id);
 
 -- Función para regenerar API key
 DROP FUNCTION IF EXISTS regenerate_api_key(UUID, TEXT);
@@ -2163,12 +2154,12 @@ ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Users can view own payments" ON public.payments;
 CREATE POLICY "Users can view own payments" 
   ON public.payments FOR SELECT 
-  USING (auth.uid() = user_id);
+  USING ((select auth.uid()) = user_id);
 
 DROP POLICY IF EXISTS "Users can insert own payments" ON public.payments;
 CREATE POLICY "Users can insert own payments" 
   ON public.payments FOR INSERT 
-  WITH CHECK (auth.uid() = user_id);
+  WITH CHECK ((select auth.uid()) = user_id);
 
 -- Comentarios
 COMMENT ON TABLE public.payments IS 'Registro de pagos realizados por los usuarios';
@@ -2218,7 +2209,7 @@ CREATE POLICY "Users can view own chatbots"
   ON public.instance_chatbots FOR SELECT
   USING (
     instance_id IN (
-      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+      SELECT document_id FROM public.instances WHERE user_id = (select auth.uid())
     )
   );
 
@@ -2227,7 +2218,7 @@ CREATE POLICY "Users can insert own chatbots"
   ON public.instance_chatbots FOR INSERT
   WITH CHECK (
     instance_id IN (
-      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+      SELECT document_id FROM public.instances WHERE user_id = (select auth.uid())
     )
   );
 
@@ -2236,7 +2227,7 @@ CREATE POLICY "Users can update own chatbots"
   ON public.instance_chatbots FOR UPDATE
   USING (
     instance_id IN (
-      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+      SELECT document_id FROM public.instances WHERE user_id = (select auth.uid())
     )
   );
 
@@ -2245,7 +2236,7 @@ CREATE POLICY "Users can delete own chatbots"
   ON public.instance_chatbots FOR DELETE
   USING (
     instance_id IN (
-      SELECT document_id FROM public.instances WHERE user_id = auth.uid()
+      SELECT document_id FROM public.instances WHERE user_id = (select auth.uid())
     )
   );
 
