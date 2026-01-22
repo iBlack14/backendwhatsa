@@ -62,7 +62,7 @@ export class DockerService {
 
       const encryptionKey = process.env.N8N_ENCRYPTION_KEY || this.generatePassword();
       const instanceUrl = `https://${serviceName}.${BASE_DOMAIN}`;
-      const traefikId = `wasapi-${serviceName}`;
+      const traefikId = `wasapi_${serviceName}`;
 
       const containerConfig: Docker.ContainerCreateOptions = {
         name: serviceName,
@@ -85,7 +85,7 @@ export class DockerService {
         ],
         Labels: {
           'traefik.enable': 'true',
-          [`traefik.http.routers.${traefikId}.rule`]: `Host(\`${serviceName}.${BASE_DOMAIN}\`)`,
+          [`traefik.http.routers.${traefikId}.rule`]: `Host("${serviceName}.${BASE_DOMAIN}")`,
           [`traefik.http.routers.${traefikId}.entrypoints`]: 'web,websecure',
           [`traefik.http.routers.${traefikId}.tls`]: 'true',
           [`traefik.http.routers.${traefikId}.tls.certresolver`]: 'letsencrypt',
@@ -94,6 +94,7 @@ export class DockerService {
           'traefik.docker.network': 'easypanel',
           'easypanel.managed': 'true',
           'easypanel.project': 'wasapi',
+          'easypanel.service': serviceName,
           'service.name': serviceName,
         },
         HostConfig: {
