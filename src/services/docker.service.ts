@@ -102,6 +102,9 @@ export class DockerService {
           NanoCpus: cpu * 1000000,
           RestartPolicy: { Name: 'unless-stopped' },
           Binds: [`${serviceName}-data:/home/node/.n8n`],
+          PortBindings: {
+            '5678/tcp': [{ HostPort: '0' }] // Exponer puerto 5678 aleatoriamente
+          }
         },
         NetworkingConfig: {
           EndpointsConfig: {
@@ -129,10 +132,11 @@ export class DockerService {
       console.log(`[Docker] 🌐 URL: https://${serviceName}.${BASE_DOMAIN}`);
       console.log(`[Docker] 🔗 Network IP (${NETWORK_NAME}): ${networkIP}`);
 
-      // En desarrollo, usar localhost con puerto
+      // En desarrollo, usar IP del host o dominio configurado
       const isDev = process.env.NODE_ENV !== 'production';
+      const hostDomain = process.env.DEV_HOST_DOMAIN || process.env.HOST_DOMAIN || 'localhost';
       const publicUrl = isDev
-        ? `http://localhost:${port}`
+        ? `http://${hostDomain}:${port}`
         : `https://${serviceName}.${BASE_DOMAIN}`;
 
       return {
