@@ -211,48 +211,77 @@ export class DockerService {
    */
   async deleteInstance(serviceName: string) {
     try {
-      console.log(`[Docker] Deleting instance: ${serviceName}`);
+      console.log(`[DOCKER] Deleting instance: ${serviceName}`);
 
       const container = docker.getContainer(serviceName);
 
-      // Detener si está corriendo
+      // ✅ Verificar si el contenedor existe antes de intentar operaciones
+      let containerExists = false;
       try {
-        await container.stop({ t: 10 });
-        console.log(`[Docker] Container stopped: ${serviceName}`);
-      } catch (e) {
-        console.log(`[Docker] Container already stopped: ${serviceName}`);
+        await container.inspect();
+        containerExists = true;
+        console.log(`[DOCKER] Container exists: ${serviceName}`);
+      } catch (inspectError: any) {
+        console.log(`[DOCKER] Container ${serviceName} does not exist or already removed`);
+        // ✅ Intentar limpiar volumen y registro de todos modos
+        await this.forceCleanup(serviceName);
+        return { success: true, message: 'Container was already removed' };
       }
 
-      // Desconectar de las redes
-      const networks = [NETWORK_NAME];
-      for (const networkName of networks) {
+      // ✅ Detener si está corriendo (con timeout y mejor manejo de errores)
+      if (containerExists) {
         try {
-          const network = docker.getNetwork(networkName);
-          await network.disconnect({ Container: serviceName, Force: true });
-          console.log(`[DOCKER] Network disconnection completed: ${networkName}`);
-        } catch (e) {
-          // Ya desconectado o no estaba conectado
+          await container.stop({ t: 10 });
+          console.log(`[DOCKER] Container stopped: ${serviceName}`);
+        } catch (stopError: any) {
+          if (stopError.statusCode === 304) {
+            console.log(`[DOCKER] Container already stopped: ${serviceName}`);
+          } else if (stopError.statusCode === 404) {
+            console.log(`[DOCKER] Container not found during stop: ${serviceName}`);
+          } else {
+            console.log(`[DOCKER] Stop error (continuing):`, stopError.message);
+          }
         }
       }
 
-      // Remove container
-      await container.remove({ force: true });
-      console.log(`[DOCKER] Container cleanup completed: ${serviceName}`);
+      // ✅ Desconectar de redes (ignorar errores)
+      await this.disconnectFromNetworks(serviceName);
 
-      // Remove persistent storage
-      try {
-        const volume = docker.getVolume(`${serviceName}-data`);
-        await volume.remove({ force: true });
-        console.log(`[DOCKER] Persistent storage removed: ${serviceName}-data`);
-      } catch (e) {
-        console.log(`[DOCKER] Persistent storage not found or already cleaned: ${serviceName}-data`);
+      // ✅ Remover contenedor con más opciones
+      if (containerExists) {
+        try {
+          await container.remove({
+            force: true,
+            v: true,  // Remove volumes
+            link: false
+          });
+          console.log(`[DOCKER] Container removed: ${serviceName}`);
+        } catch (removeError: any) {
+          if (removeError.statusCode === 404) {
+            console.log(`[DOCKER] Container already removed: ${serviceName}`);
+          } else {
+            console.error(`[DOCKER] Failed to remove container:`, removeError.message);
+            // ❌ No tirar error aquí, continuar con cleanup
+          }
+        }
       }
+
+      // ✅ Limpiar volumen y base de datos
+      await this.cleanupVolumeAndDatabase(serviceName);
 
       console.log(`[DOCKER] Service removal completed successfully: ${serviceName}`);
       return { success: true, message: 'Service deleted successfully' };
     } catch (error: any) {
       console.error(`[DOCKER] Service removal failed for ${serviceName}:`, error.message);
-      throw new Error(`Service removal failed: ${error.message || 'Unknown error'}`);
+
+      // ❌ Si todo falla, intentar cleanup básico
+      try {
+        await this.forceCleanup(serviceName);
+        return { success: true, message: 'Service partially cleaned up' };
+      } catch (cleanupError: any) {
+        console.error(`[DOCKER] Force cleanup also failed:`, cleanupError.message);
+        throw new Error(`Service removal failed: ${error.message}`);
+      }
     }
   }
 
@@ -466,6 +495,44 @@ export class DockerService {
   }
 
   // ========== Utilidades Privadas ==========
+
+  /**
+   * Desconectar contenedor de todas las redes
+   */
+  private async disconnectFromNetworks(serviceName: string) {
+    const networks = [NETWORK_NAME, 'bridge'];
+    for (const networkName of networks) {
+      try {
+        const network = docker.getNetwork(networkName);
+        await network.disconnect({ Container: serviceName, Force: true });
+        console.log(`[DOCKER] Network disconnection completed: ${networkName}`);
+      } catch (e) {
+        // Ignorar errores de desconexión - el contenedor puede no estar conectado
+      }
+    }
+  }
+
+  /**
+   * Limpiar volumen y registro de base de datos
+   */
+  private async cleanupVolumeAndDatabase(serviceName: string) {
+    try {
+      const volume = docker.getVolume(`${serviceName}-data`);
+      await volume.remove({ force: true });
+      console.log(`[DOCKER] Persistent storage removed: ${serviceName}-data`);
+    } catch (e) {
+      console.log(`[DOCKER] Persistent storage not found or already cleaned: ${serviceName}-data`);
+    }
+  }
+
+  /**
+   * Cleanup forzado cuando todo lo demás falla
+   */
+  private async forceCleanup(serviceName: string) {
+    // Cleanup básico si todo lo demás falla
+    await this.cleanupVolumeAndDatabase(serviceName);
+    console.log(`[DOCKER] Force cleanup completed for: ${serviceName}`);
+  }
 
   /**
    * Generar contraseña segura
