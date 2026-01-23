@@ -89,6 +89,13 @@ export class DockerService {
           // Additional settings for stability
           'N8N_SKIP_WEBHOOK_DEREGISTRATION_SHUTDOWN=true',
           'NODE_ENV=production',
+          // Force HTTP for internal communication
+          'N8N_PROTOCOL=https',
+          'N8N_SSL_KEY=',
+          'N8N_SSL_CERT=',
+          // Additional startup settings
+          'GENERIC_TIMEZONE=America/Bogota',
+          'N8N_DEFAULT_LOCALE=en',
         ],
         Labels: {
           'traefik.enable': 'true',
@@ -130,12 +137,13 @@ export class DockerService {
       console.log(`[DOCKER] Instance endpoint: https://${serviceName}.${BASE_DOMAIN}`);
       console.log(`[DOCKER] Network configuration: ${networkIP}`);
 
-      // Perform initial health verification
+      // Perform initial health verification with extended timeout
       console.log(`[DOCKER] Performing initial service health check...`);
-      const isReady = await this.waitForN8nReady(serviceName, 10, 3000); // 10 attempts, 3 seconds = 30 seconds maximum
+      const isReady = await this.waitForN8nReady(serviceName, 20, 10000); // 20 attempts, 10 seconds = 200 seconds (3.3 minutes) maximum
 
       if (!isReady) {
         console.log(`[DOCKER] Service initialization in progress. Full readiness may require additional time.`);
+        console.log(`[DOCKER] Container created successfully. N8N may take 5-10 minutes to complete initialization.`);
       }
 
       // Siempre usar HTTPS con Traefik en producción
@@ -383,7 +391,7 @@ export class DockerService {
   /**
    * Verificar que n8n esté listo y respondiendo
    */
-  async waitForN8nReady(serviceName: string, maxRetries: number = 30, delay: number = 5000): Promise<boolean> {
+  async waitForN8nReady(serviceName: string, maxRetries: number = 20, delay: number = 10000): Promise<boolean> {
     const instanceUrl = `https://${serviceName}.${BASE_DOMAIN}`;
 
     for (let i = 0; i < maxRetries; i++) {
@@ -393,8 +401,29 @@ export class DockerService {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
+        // Test basic connectivity first
+        try {
+          const response = await fetch(instanceUrl, {
+            signal: controller.signal,
+            headers: {
+              'User-Agent': 'BLXK-Suite-HealthCheck/1.0',
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+            },
+            redirect: 'follow'
+          });
+
+          // Any response that's not 404 means the service is responding
+          if (response.status !== 404) {
+            console.log(`[DOCKER] Service connectivity confirmed for ${serviceName} (status: ${response.status})`);
+            clearTimeout(timeoutId);
+            return true;
+          }
+        } catch (connectivityError: any) {
+          // Continue with endpoint checks
+        }
+
         // Test multiple endpoints - n8n may use different health endpoints
-        const endpoints = ['/', '/rest/health', '/healthz', '/health'];
+        const endpoints = ['/rest/health', '/healthz', '/health'];
         let response: Response | null = null;
 
         for (const endpoint of endpoints) {

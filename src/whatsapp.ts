@@ -199,11 +199,11 @@ async function getInstanceWebhookUrl(instanceId: string): Promise<string | null>
 
 export async function createWhatsAppSession(clientId: string): Promise<void> {
   if (sessions.has(clientId)) {
-    console.log(`✅ Session ${clientId} already exists`);
+    console.log(`[WHATSAPP] Session ${clientId} already active`);
     return;
   }
 
-  console.log(`🔄 Creating session for ${clientId}...`);
+  console.log(`[WHATSAPP] Initializing session for ${clientId}...`);
 
   // Usar autenticación basada en Supabase
   const { state, saveCreds } = await useSupabaseAuthState(clientId);
@@ -213,10 +213,10 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
   let agent = undefined;
 
   if (proxy) {
-    console.log(`🌐 Using proxy: ${proxy.name} (${proxy.type}://${proxy.host}:${proxy.port})`);
+    console.log(`[WHATSAPP] Using proxy configuration: ${proxy.name} (${proxy.type}://${proxy.host}:${proxy.port})`);
     agent = proxyService.createProxyAgent(proxy);
   } else {
-    console.log(`📡 No proxy configured for instance ${clientId}`);
+    console.log(`[WHATSAPP] No proxy configured for instance ${clientId}`);
   }
 
   const sock = makeWASocket({
@@ -245,32 +245,32 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
 
     if (qr) {
       console.log('\n' + '='.repeat(60));
-      console.log(`📱 QR CODE GENERATED FOR: ${clientId}`);
+      console.log(`[WHATSAPP] QR CODE GENERATED FOR: ${clientId}`);
       console.log('='.repeat(60));
-      console.log('👉 Scan this QR code with WhatsApp to connect');
+      console.log('Scan this QR code with WhatsApp to establish connection');
       console.log('='.repeat(60) + '\n');
 
-      // Imprimir QR en la terminal para debugging
+      // Generate terminal QR for debugging
       try {
         const qrTerminal = require('qrcode-terminal');
         qrTerminal.generate(qr, { small: true });
       } catch (e) {
-        console.log('⚠️ qrcode-terminal not installed, skipping terminal QR');
+        console.log('[WHATSAPP] Terminal QR display not available');
       }
 
-      // Convertir QR a base64 para el frontend
-      console.log(`🔄 Converting QR to base64...`);
+      // Convert QR to base64 for frontend
+      console.log(`[WHATSAPP] Processing QR code for client delivery...`);
       const qrBase64 = await QRCode.toDataURL(qr);
       session.qr = qrBase64;
       session.state = 'Initializing';
 
-      console.log(`💾 Saving QR to database (length: ${qrBase64.length} chars)...`);
+      console.log(`[WHATSAPP] Persisting QR code to database (${qrBase64.length} characters)...`);
       await updateInstanceInN8N(clientId, {
         state: 'Initializing',
         qr: qrBase64,
-        qr_loading: false, // Cambiar a false porque el QR ya está listo
+        qr_loading: false, // QR is now ready for scanning
       });
-      console.log(`✅ QR saved! Frontend should receive it within 1-2 seconds.`);
+      console.log(`[WHATSAPP] QR code saved successfully. Client should receive it within 1-2 seconds.`);
     }
 
     if (connection === 'close') {
@@ -279,8 +279,7 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
         DisconnectReason.loggedOut;
 
       console.log(
-        `❌ Connection closed for ${clientId}. Reconnect:`,
-        shouldReconnect
+        `[WHATSAPP] Connection terminated for ${clientId}. Auto-reconnect: ${shouldReconnect}`
       );
 
       if (shouldReconnect) {
@@ -288,7 +287,7 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
         session.state = 'Disconnected';
         // Eliminar sesión existente antes de reconectar
         sessions.delete(clientId);
-        console.log(`🔄 Reconnecting session ${clientId}...`);
+        console.log(`[WHATSAPP] Initiating automatic reconnection for ${clientId}...`);
         // Pequeño delay para evitar race conditions
         await new Promise(resolve => setTimeout(resolve, 1000));
         await createWhatsAppSession(clientId);
@@ -302,26 +301,26 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
         });
       }
     } else if (connection === 'open') {
-      console.log(`✅ Connection opened for ${clientId}`);
+      console.log(`[WHATSAPP] Connection established for ${clientId}`);
       session.state = 'Connected';
       session.qr = null;
 
-      // Obtener info del usuario
+      // Retrieve user information
       const user = sock.user;
       if (user) {
         session.phoneNumber = user.id.split(':')[0];
         session.profileName = user.name || '';
-        console.log(`📞 Phone: ${session.phoneNumber}`);
-        console.log(`👤 Name: ${session.profileName}`);
+        console.log(`[WHATSAPP] Account: ${session.phoneNumber}`);
+        console.log(`[WHATSAPP] Display name: ${session.profileName}`);
 
-        // Intentar obtener foto de perfil
+        // Attempt to retrieve profile picture
         try {
           const jid = user.id;
           const profilePicUrl = await sock.profilePictureUrl(jid, 'image');
           session.profilePicUrl = profilePicUrl;
-          console.log(`📸 Profile pic: ${profilePicUrl ? 'Found' : 'Not found'}`);
+          console.log(`[WHATSAPP] Profile image: ${profilePicUrl ? 'Retrieved' : 'Not available'}`);
         } catch (error) {
-          console.log(`⚠️ Could not get profile picture`);
+          console.log(`[WHATSAPP] Profile image retrieval failed`);
           session.profilePicUrl = undefined;
         }
       }
@@ -363,9 +362,9 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
     }
   });
 
-  // ✅✅ WEBHOOK: Notificar al frontend cuando se envían/reciben mensajes
+  // Message processing and webhook notifications
   sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    console.log(`[${clientId}] 📨 messages.upsert event - ${messages.length} message(s)`);
+    console.log(`[WHATSAPP] Processing ${messages.length} message(s) for ${clientId}`);
 
     for (const msg of messages) {
       try {
@@ -373,17 +372,17 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
         const remoteJid = msg.key.remoteJid;
         const messageId = msg.key.id;
 
-        console.log(`[${clientId}] ${fromMe ? '📤 Sent' : '📥 Received'} message - ${remoteJid}`);
+        console.log(`[WHATSAPP] ${fromMe ? 'Outbound' : 'Inbound'} message from ${remoteJid}`);
 
-        // 💾 Guardar mensaje en la base de datos
+        // Persist message to database
         try {
-          // Usar la nueva función para extraer texto completo
+          // Extract complete message text
           const messageText = extractMessageText(msg.message);
           const messageType = detectMessageType(msg.message);
 
-          console.log(`[${clientId}] 📋 Message type: ${messageType}`);
+          console.log(`[WHATSAPP] Message type: ${messageType}`);
           if (messageText) {
-            console.log(`[${clientId}] 💬 Content: ${messageText.substring(0, 50)}${messageText.length > 50 ? '...' : ''}`);
+            console.log(`[WHATSAPP] Content: ${messageText.substring(0, 50)}${messageText.length > 50 ? '...' : ''}`);
           }
 
           // Extraer nombre del contacto
@@ -430,25 +429,25 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
             }
 
             if (mediaUrl) {
-              console.log(`[${clientId}] 📎 Media uploaded: ${mediaUrl}`);
+              console.log(`[WHATSAPP] Media file uploaded: ${mediaUrl}`);
             }
           } catch (mediaError) {
-            console.error(`[${clientId}] ❌ Error downloading/uploading media:`, mediaError);
+            console.error(`[WHATSAPP] Media processing failed:`, mediaError);
           }
 
-          // Intentar obtener foto de perfil del contacto
+          // Attempt to retrieve contact profile picture
           let profilePicUrl: string | undefined = undefined;
           try {
             if (remoteJid && !fromMe) {
-              // Para chats individuales, usar el JID del remitente
-              // Para grupos, usar el JID del grupo
+              // For individual chats, use sender JID
+              // For groups, use group JID
               const picJid = remoteJid;
               profilePicUrl = await sock.profilePictureUrl(picJid, 'image');
-              console.log(`[${clientId}] 📸 Profile pic obtained for ${picJid}`);
+              console.log(`[WHATSAPP] Contact profile image retrieved for ${picJid}`);
             }
           } catch (picError) {
-            // No hay foto de perfil o error al obtenerla
-            console.log(`[${clientId}] ⚠️ No profile pic for ${remoteJid}`);
+            // Profile picture not available or retrieval failed
+            console.log(`[WHATSAPP] Contact profile image not available for ${remoteJid}`);
           }
 
           const savedMessage = {
@@ -470,9 +469,9 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
 
           await messageService.saveMessage(savedMessage);
 
-          console.log(`[${clientId}] ✅ Message saved to database`);
+          console.log(`[WHATSAPP] Message persisted to database`);
 
-          // 💾 Guardar/actualizar contacto automáticamente
+          // Automatically save/update contact information
           if (!fromMe && remoteJid && !remoteJid.includes('@g.us')) {
             try {
               await contactService.saveContact({
@@ -483,13 +482,13 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
                 profile_pic_url: profilePicUrl,
                 is_blocked: false,
               });
-              console.log(`[${clientId}] 💾 Contact saved/updated: ${remoteJid}`);
+              console.log(`[WHATSAPP] Contact information updated: ${remoteJid}`);
             } catch (contactError) {
-              console.error(`[${clientId}] ⚠️ Error saving contact:`, contactError);
+              console.error(`[WHATSAPP] Contact update failed:`, contactError);
             }
           }
 
-          // 🔌 Emitir evento WebSocket para actualización en tiempo real
+          // Emit WebSocket event for real-time updates
           try {
             wsService.emitNewMessage(clientId, {
               ...savedMessage,
@@ -527,7 +526,7 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
           if (frontendUrl) {
             webhookUrl = `${frontendUrl}/api/webhooks/whatsapp`;
             webhookMode = 'Templates (internal)';
-            console.log(`[${clientId}] 🏠 Using internal webhook (Templates): ${webhookUrl}`);
+            console.log(`[WHATSAPP] Using internal webhook endpoint: ${webhookUrl}`);
           } else {
             console.warn(`[${clientId}] ⚠️ No webhook configured (neither custom nor FRONTEND_URL), skipping`);
             continue;
@@ -555,7 +554,7 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
           }
         });
 
-        console.log(`[${clientId}] ✅ Webhook sent (${webhookMode}): ${fromMe ? 'sent' : 'received'}`);
+        console.log(`[WHATSAPP] Webhook notification sent (${webhookMode}): ${fromMe ? 'outbound' : 'inbound'}`);
       } catch (webhookError: any) {
         console.error(`[${clientId}] ❌ Error sending webhook:`, webhookError.message);
         // No bloquear el flujo si falla el webhook
@@ -693,21 +692,21 @@ export async function restoreAllSessions(): Promise<void> {
     // Eliminar duplicados por si acaso (aunque key='creds' debería ser único por session_id)
     const sessionIds = [...new Set(data.map(row => row.session_id))];
 
-    console.log(`📂 Found ${sessionIds.length} session(s) in database`);
+    console.log(`[WHATSAPP] Discovered ${sessionIds.length} session(s) in database`);
 
-    // Restaurar cada sesión
+    // Restore each session
     for (const clientId of sessionIds) {
       try {
-        console.log(`🔄 Restoring session: ${clientId}`);
+        console.log(`[WHATSAPP] Restoring session: ${clientId}`);
         await createWhatsAppSession(clientId);
-        // Pequeña pausa entre conexiones
+        // Brief pause between connections
         await new Promise(resolve => setTimeout(resolve, 2000));
       } catch (error: any) {
-        console.error(`❌ Failed to restore session ${clientId}:`, error.message);
+        console.error(`[WHATSAPP] Session restoration failed for ${clientId}:`, error.message);
       }
     }
 
-    console.log(`✅ Session restoration complete. Active sessions: ${sessions.size}`);
+    console.log(`[WHATSAPP] Session restoration completed. Active sessions: ${sessions.size}`);
   } catch (error: any) {
     console.error('❌ Error in restoreAllSessions:', error.message);
   }

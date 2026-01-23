@@ -70,14 +70,14 @@ wsService.initialize(httpServer);
 httpServer.listen(PORT, '0.0.0.0', async () => {
   const host = process.env.HOST || 'localhost';
 
-  logger.info('🚀 WhatsApp Backend Server started');
-  logger.info(`🌐 Running on: http://0.0.0.0:${PORT}`);
-  logger.info(`🌐 Local: http://localhost:${PORT}`);
-  logger.info(`🌐 Network: http://${host}:${PORT}`);
-  logger.info(`✅ Health check: http://${host}:${PORT}/health`);
-  logger.info(`🔌 WebSocket: ws://${host}:${PORT}/socket.io/`);
+  logger.info('WhatsApp Backend Server started successfully');
+  logger.info(`Server listening on: http://0.0.0.0:${PORT}`);
+  logger.info(`Local access: http://localhost:${PORT}`);
+  logger.info(`Network access: http://${host}:${PORT}`);
+  logger.info(`Health endpoint: http://${host}:${PORT}/health`);
+  logger.info(`WebSocket endpoint: ws://${host}:${PORT}/socket.io/`);
 
-  logger.info('📋 Available endpoints:');
+  logger.info('Available API endpoints:');
   logger.info('   POST   /api/create-session');
   logger.info('   POST   /api/generate-qr');
   logger.info('   GET    /api/qr/:clientId');
@@ -93,23 +93,23 @@ httpServer.listen(PORT, '0.0.0.0', async () => {
   logger.info('   GET    /api/contacts/search/:instanceId?q=');
   logger.info('   POST   /api/messages/send');
 
-  // Restaurar sesiones existentes
-  logger.info('🔄 Restoring WhatsApp Sessions...');
+  // Initialize existing sessions
+  logger.info('Initializing existing WhatsApp sessions...');
   try {
     await restoreAllSessions();
-    logger.info('✅ Sessions restored successfully');
+    logger.info('Session initialization completed successfully');
   } catch (error: any) {
-    logger.error({ error: error.message }, '❌ Error restoring sessions');
+    logger.error({ error: error.message }, 'Session initialization failed');
   }
 });
 
-// Graceful shutdown
+// Graceful shutdown handling
 process.on('SIGINT', () => {
-  logger.info('🛑 Shutting down gracefully...');
+  logger.info('Received shutdown signal, terminating gracefully...');
   process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-  logger.info('🛑 Shutting down gracefully...');
+  logger.info('Received termination signal, shutting down gracefully...');
   process.exit(0);
 });
