@@ -25,7 +25,8 @@ const docker = getDockerConnection();
 console.log('✅ Docker connection initialized for', process.platform);
 
 const BASE_DOMAIN = process.env.EASYPANEL_BASE_DOMAIN || process.env.BASE_DOMAIN || 'ld4pxg.easypanel.host';
-const NETWORK_NAME = process.env.DOCKER_NETWORK || 'easypanel-blxk';
+// Let Easypanel handle networking automatically
+const NETWORK_NAME = process.env.DOCKER_NETWORK || 'bridge';
 
 interface CreateN8nInstanceParams {
   serviceName: string;
@@ -79,9 +80,15 @@ export class DockerService {
           'N8N_LISTEN_ADDRESS=0.0.0.0',
           'N8N_TRUST_PROXY=true',
           'N8N_ENFORCE_SETTINGS_FILE_PERMISSIONS=true',
+          // Database configuration
+          'DB_TYPE=sqlite',
+          'DB_SQLITE_DATABASE=/home/node/.n8n/database.sqlite',
           'DB_SQLITE_POOL_SIZE=3',
           'EXECUTIONS_DATA_PRUNE=true',
           'EXECUTIONS_DATA_MAX_AGE=168',
+          // Additional settings for stability
+          'N8N_SKIP_WEBHOOK_DEREGISTRATION_SHUTDOWN=true',
+          'NODE_ENV=production',
         ],
         Labels: {
           'traefik.enable': 'true',
@@ -91,7 +98,8 @@ export class DockerService {
           [`traefik.http.routers.${traefikId}.tls.certresolver`]: 'letsencrypt',
           [`traefik.http.routers.${traefikId}.service`]: traefikId,
           [`traefik.http.services.${traefikId}.loadbalancer.server.port`]: '5678',
-          'traefik.docker.network': 'easypanel-blxk',
+          // Try without specifying network to let Easypanel handle it
+          // 'traefik.docker.network': 'easypanel-blxk',
           'easypanel.managed': 'true',
           'easypanel.project': 'wasapi',
           'easypanel.service': serviceName,
@@ -102,11 +110,6 @@ export class DockerService {
           NanoCpus: cpu * 1000000,
           RestartPolicy: { Name: 'unless-stopped' },
           Binds: [`${serviceName}-data:/home/node/.n8n`],
-        },
-        NetworkingConfig: {
-          EndpointsConfig: {
-            'easypanel-blxk': {}
-          }
         },
       };
 
@@ -127,13 +130,12 @@ export class DockerService {
       console.log(`[Docker] 🌐 URL: https://${serviceName}.${BASE_DOMAIN}`);
       console.log(`[Docker] 🔗 Network IP (${NETWORK_NAME}): ${networkIP}`);
 
-      // Esperar a que n8n esté listo antes de marcar como exitoso
-      console.log(`[Docker] ⏳ Waiting for N8N to initialize...`);
-      const isReady = await this.waitForN8nReady(serviceName, 30, 5000); // 30 intentos, 5 segundos cada uno = 2.5 minutos máximo
+      // Intentar verificar que n8n esté listo, pero no fallar si no lo está
+      console.log(`[Docker] ⏳ Checking if N8N is initializing...`);
+      const isReady = await this.waitForN8nReady(serviceName, 10, 3000); // 10 intentos, 3 segundos = 30 segundos máximo
 
       if (!isReady) {
-        console.warn(`[Docker] ⚠️ N8N instance ${serviceName} started but health check failed. It may still be initializing.`);
-        // No fallar la creación, pero informar al usuario
+        console.log(`[Docker] ℹ️ N8N instance ${serviceName} is starting. It may take several minutes to be fully ready.`);
       }
 
       // Siempre usar HTTPS con Traefik en producción
