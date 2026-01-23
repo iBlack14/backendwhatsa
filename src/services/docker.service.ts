@@ -127,6 +127,15 @@ export class DockerService {
       console.log(`[Docker] 🌐 URL: https://${serviceName}.${BASE_DOMAIN}`);
       console.log(`[Docker] 🔗 Network IP (${NETWORK_NAME}): ${networkIP}`);
 
+      // Esperar a que n8n esté listo antes de marcar como exitoso
+      console.log(`[Docker] ⏳ Waiting for N8N to initialize...`);
+      const isReady = await this.waitForN8nReady(serviceName, 30, 5000); // 30 intentos, 5 segundos cada uno = 2.5 minutos máximo
+
+      if (!isReady) {
+        console.warn(`[Docker] ⚠️ N8N instance ${serviceName} started but health check failed. It may still be initializing.`);
+        // No fallar la creación, pero informar al usuario
+      }
+
       // Siempre usar HTTPS con Traefik en producción
       const publicUrl = `https://${serviceName}.${BASE_DOMAIN}`;
 
@@ -139,7 +148,10 @@ export class DockerService {
         credentials: {
           url: publicUrl,
           setup_required: true,
-          note: 'Accede a la URL para completar el setup inicial de N8N y crear tu cuenta',
+          note: isReady
+            ? 'N8N está listo. Accede a la URL para completar el setup inicial y crear tu cuenta.'
+            : 'N8N se está inicializando. Puede tomar unos minutos estar completamente listo. Revisa la URL en unos momentos.',
+          health_check_passed: isReady,
         },
       };
     } catch (error: any) {
@@ -363,6 +375,52 @@ export class DockerService {
         throw error;
       }
     }
+  }
+
+  /**
+   * Verificar que n8n esté listo y respondiendo
+   */
+  async waitForN8nReady(serviceName: string, maxRetries: number = 30, delay: number = 5000): Promise<boolean> {
+    const instanceUrl = `https://${serviceName}.${BASE_DOMAIN}`;
+
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        console.log(`[Docker] Checking n8n health (${i + 1}/${maxRetries}): ${instanceUrl}/healthz`);
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
+        const response = await fetch(`${instanceUrl}/healthz`, {
+          signal: controller.signal,
+          headers: {
+            'User-Agent': 'BLXK-Suite-HealthCheck/1.0'
+          }
+        });
+
+        clearTimeout(timeoutId);
+
+        if (response.ok) {
+          console.log(`[Docker] ✅ N8N instance ${serviceName} is ready!`);
+          return true;
+        } else {
+          console.log(`[Docker] N8N health check returned status: ${response.status}`);
+        }
+      } catch (error: any) {
+        if (error.name === 'AbortError') {
+          console.log(`[Docker] N8N health check timed out (attempt ${i + 1}/${maxRetries})`);
+        } else {
+          console.log(`[Docker] N8N health check failed (attempt ${i + 1}/${maxRetries}): ${error.message}`);
+        }
+      }
+
+      // Esperar antes del siguiente intento
+      if (i < maxRetries - 1) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+
+    console.log(`[Docker] ❌ N8N instance ${serviceName} failed to become ready after ${maxRetries} attempts`);
+    return false;
   }
 
   // ========== Utilidades Privadas ==========
