@@ -390,21 +390,37 @@ export class DockerService {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
-        const response = await fetch(`${instanceUrl}/healthz`, {
-          signal: controller.signal,
-          headers: {
-            'User-Agent': 'BLXK-Suite-HealthCheck/1.0'
+        // Try multiple endpoints - n8n might use different health endpoints
+        const endpoints = ['/', '/rest/health', '/healthz', '/health'];
+        let response: Response | null = null;
+
+        for (const endpoint of endpoints) {
+          try {
+            console.log(`[Docker] Trying endpoint: ${endpoint}`);
+            response = await fetch(`${instanceUrl}${endpoint}`, {
+              signal: controller.signal,
+              headers: {
+                'User-Agent': 'BLXK-Suite-HealthCheck/1.0'
+              }
+            });
+
+            // If we get a 200 or any response that indicates n8n is running (not 404 or 502)
+            if (response.status === 200 || response.status === 302 || (response.status >= 400 && response.status !== 404 && response.status !== 502)) {
+              console.log(`[Docker] ✅ N8N instance ${serviceName} responded with status ${response.status} on ${endpoint}`);
+              clearTimeout(timeoutId);
+              return true;
+            }
+          } catch (endpointError: any) {
+            // Continue to next endpoint
+            console.log(`[Docker] Endpoint ${endpoint} failed: ${endpointError.message}`);
           }
-        });
+        }
+
+        if (response) {
+          console.log(`[Docker] N8N health check returned status: ${response.status} (all endpoints)`);
+        }
 
         clearTimeout(timeoutId);
-
-        if (response.ok) {
-          console.log(`[Docker] ✅ N8N instance ${serviceName} is ready!`);
-          return true;
-        } else {
-          console.log(`[Docker] N8N health check returned status: ${response.status}`);
-        }
       } catch (error: any) {
         if (error.name === 'AbortError') {
           console.log(`[Docker] N8N health check timed out (attempt ${i + 1}/${maxRetries})`);
