@@ -1,28 +1,28 @@
 import Docker from 'dockerode';
 
-// Configuración para Windows (Docker Desktop)
+// Platform-specific Docker connection configuration
 const getDockerConnection = () => {
   if (process.platform === 'win32') {
-    // Windows: Intentar con named pipe primero
+    // Windows: Attempt named pipe connection first
     try {
       return new Docker({ socketPath: '//./pipe/docker_engine' });
     } catch (error) {
-      console.warn('⚠️ Named pipe failed, trying npipe...');
+      console.log('[DOCKER] Named pipe connection failed, attempting alternative...');
       try {
         return new Docker({ socketPath: '\\\\.\\pipe\\docker_engine' });
       } catch (error2) {
-        console.warn('⚠️ Npipe failed, using default...');
-        return new Docker(); // Usa configuración por defecto
+        console.log('[DOCKER] Alternative connection failed, using default configuration...');
+        return new Docker(); // Use default configuration
       }
     }
   } else {
-    // Linux/Mac: usar socket Unix
+    // Linux/Mac: Use Unix socket
     return new Docker({ socketPath: '/var/run/docker.sock' });
   }
 };
 
 const docker = getDockerConnection();
-console.log('✅ Docker connection initialized for', process.platform);
+console.log(`[DOCKER] Container runtime connection established for ${process.platform} platform`);
 
 const BASE_DOMAIN = process.env.EASYPANEL_BASE_DOMAIN || process.env.BASE_DOMAIN || 'ld4pxg.easypanel.host';
 // Let Easypanel handle networking automatically
@@ -53,12 +53,12 @@ export class DockerService {
     const { serviceName, userId, memory = '512m', cpu = 512 } = params;
 
     try {
-      console.log(`[Docker] Creating n8n instance: ${serviceName}`);
-      console.log(`[Docker] N8N_ENCRYPTION_KEY from env:`, process.env.N8N_ENCRYPTION_KEY ? 'FOUND' : 'NOT FOUND');
+      console.log(`[DOCKER] Initializing N8N instance creation: ${serviceName}`);
+      console.log(`[DOCKER] Environment validation: N8N_ENCRYPTION_KEY ${process.env.N8N_ENCRYPTION_KEY ? 'configured' : 'missing, using generated key'}`);
 
-      // Configuración del contenedor
+      // Container configuration
       const imageName = 'n8nio/n8n:latest';
-      console.log(`[Docker] Checking image: ${imageName}`);
+      console.log(`[DOCKER] Verifying container image: ${imageName}`);
       await this.ensureImageExists(imageName);
 
       const encryptionKey = process.env.N8N_ENCRYPTION_KEY || this.generatePassword();
@@ -126,16 +126,16 @@ export class DockerService {
       const containerInfo = await container.inspect();
       const networkIP = containerInfo.NetworkSettings.Networks?.[NETWORK_NAME]?.IPAddress || 'unknown';
 
-      console.log(`[Docker] ✅ Instance created and started: ${serviceName}`);
-      console.log(`[Docker] 🌐 URL: https://${serviceName}.${BASE_DOMAIN}`);
-      console.log(`[Docker] 🔗 Network IP (${NETWORK_NAME}): ${networkIP}`);
+      console.log(`[DOCKER] Container deployment completed: ${serviceName}`);
+      console.log(`[DOCKER] Instance endpoint: https://${serviceName}.${BASE_DOMAIN}`);
+      console.log(`[DOCKER] Network configuration: ${networkIP}`);
 
-      // Intentar verificar que n8n esté listo, pero no fallar si no lo está
-      console.log(`[Docker] ⏳ Checking if N8N is initializing...`);
-      const isReady = await this.waitForN8nReady(serviceName, 10, 3000); // 10 intentos, 3 segundos = 30 segundos máximo
+      // Perform initial health verification
+      console.log(`[DOCKER] Performing initial service health check...`);
+      const isReady = await this.waitForN8nReady(serviceName, 10, 3000); // 10 attempts, 3 seconds = 30 seconds maximum
 
       if (!isReady) {
-        console.log(`[Docker] ℹ️ N8N instance ${serviceName} is starting. It may take several minutes to be fully ready.`);
+        console.log(`[DOCKER] Service initialization in progress. Full readiness may require additional time.`);
       }
 
       // Siempre usar HTTPS con Traefik en producción
@@ -157,8 +157,8 @@ export class DockerService {
         },
       };
     } catch (error: any) {
-      console.error('[Docker] ❌ Error creating instance:', error.message);
-      throw new Error(error.message || 'Failed to create n8n instance');
+      console.error(`[DOCKER] Instance creation failed for ${serviceName}:`, error.message);
+      throw new Error(`Service deployment failed: ${error.message || 'Unknown error'}`);
     }
   }
 
@@ -167,16 +167,16 @@ export class DockerService {
    */
   async startInstance(serviceName: string) {
     try {
-      console.log(`[Docker] Starting instance: ${serviceName}`);
+      console.log(`[DOCKER] Initiating service startup: ${serviceName}`);
 
       const container = docker.getContainer(serviceName);
       await container.start();
 
-      console.log(`[Docker] ✅ Instance started: ${serviceName}`);
-      return { success: true, message: 'Instance started successfully' };
+      console.log(`[DOCKER] Service startup completed: ${serviceName}`);
+      return { success: true, message: 'Service started successfully' };
     } catch (error: any) {
-      console.error('[Docker] ❌ Error starting instance:', error.message);
-      throw new Error(error.message || 'Failed to start instance');
+      console.error(`[DOCKER] Service startup failed for ${serviceName}:`, error.message);
+      throw new Error(`Service startup failed: ${error.message || 'Unknown error'}`);
     }
   }
 
@@ -185,16 +185,16 @@ export class DockerService {
    */
   async pauseInstance(serviceName: string) {
     try {
-      console.log(`[Docker] Pausing instance: ${serviceName}`);
+      console.log(`[DOCKER] Initiating service shutdown: ${serviceName}`);
 
       const container = docker.getContainer(serviceName);
       await container.stop();
 
-      console.log(`[Docker] ✅ Instance paused: ${serviceName}`);
-      return { success: true, message: 'Instance paused successfully' };
+      console.log(`[DOCKER] Service shutdown completed: ${serviceName}`);
+      return { success: true, message: 'Service paused successfully' };
     } catch (error: any) {
-      console.error('[Docker] ❌ Error pausing instance:', error.message);
-      throw new Error(error.message || 'Failed to pause instance');
+      console.error(`[DOCKER] Service shutdown failed for ${serviceName}:`, error.message);
+      throw new Error(`Service shutdown failed: ${error.message || 'Unknown error'}`);
     }
   }
 
@@ -221,30 +221,30 @@ export class DockerService {
         try {
           const network = docker.getNetwork(networkName);
           await network.disconnect({ Container: serviceName, Force: true });
-          console.log(`[Docker] Disconnected from network: ${networkName}`);
+          console.log(`[DOCKER] Network disconnection completed: ${networkName}`);
         } catch (e) {
           // Ya desconectado o no estaba conectado
         }
       }
 
-      // Eliminar contenedor
+      // Remove container
       await container.remove({ force: true });
-      console.log(`[Docker] Container removed: ${serviceName}`);
+      console.log(`[DOCKER] Container cleanup completed: ${serviceName}`);
 
-      // Eliminar volumen
+      // Remove persistent storage
       try {
         const volume = docker.getVolume(`${serviceName}-data`);
         await volume.remove({ force: true });
-        console.log(`[Docker] Volume removed: ${serviceName}-data`);
+        console.log(`[DOCKER] Persistent storage removed: ${serviceName}-data`);
       } catch (e) {
-        console.log(`[Docker] Volume not found or already removed: ${serviceName}-data`);
+        console.log(`[DOCKER] Persistent storage not found or already cleaned: ${serviceName}-data`);
       }
 
-      console.log(`[Docker] ✅ Instance deleted completely: ${serviceName}`);
-      return { success: true, message: 'Instance deleted successfully' };
+      console.log(`[DOCKER] Service removal completed successfully: ${serviceName}`);
+      return { success: true, message: 'Service deleted successfully' };
     } catch (error: any) {
-      console.error('[Docker] ❌ Error deleting instance:', error.message);
-      throw new Error(error.message || 'Failed to delete instance');
+      console.error(`[DOCKER] Service removal failed for ${serviceName}:`, error.message);
+      throw new Error(`Service removal failed: ${error.message || 'Unknown error'}`);
     }
   }
 
@@ -313,9 +313,9 @@ export class DockerService {
     try {
       const image = docker.getImage(imageName);
       await image.inspect();
-      console.log(`[Docker] Image ${imageName} already exists`);
+      console.log(`[DOCKER] Image verification successful: ${imageName}`);
     } catch (error) {
-      console.log(`[Docker] Image ${imageName} not found, pulling...`);
+      console.log(`[DOCKER] Image ${imageName} not available locally, initiating download...`);
       await new Promise((resolve, reject) => {
         docker.pull(imageName, (err: any, stream: any) => {
           if (err) return reject(err);
@@ -327,11 +327,11 @@ export class DockerService {
           }
 
           function onProgress(event: any) {
-            // Opcional: mostrar progreso
+            // Progress tracking disabled for cleaner logs
           }
         });
       });
-      console.log(`[Docker] Image ${imageName} pulled successfully`);
+      console.log(`[DOCKER] Image download completed: ${imageName}`);
     }
   }
 
@@ -369,11 +369,12 @@ export class DockerService {
           'easypanel.managed': 'true',
         },
       });
-      console.log(`[Docker] Volume created: ${volumeName}`);
+      console.log(`[DOCKER] Persistent storage created: ${volumeName}`);
     } catch (error: any) {
       if (error.statusCode === 409) {
-        console.log(`[Docker] Volume already exists: ${volumeName}`);
+        console.log(`[DOCKER] Persistent storage already exists: ${volumeName}`);
       } else {
+        console.error(`[DOCKER] Storage creation failed: ${error.message}`);
         throw error;
       }
     }
@@ -387,18 +388,17 @@ export class DockerService {
 
     for (let i = 0; i < maxRetries; i++) {
       try {
-        console.log(`[Docker] Checking n8n health (${i + 1}/${maxRetries}): ${instanceUrl}/healthz`);
+        console.log(`[DOCKER] Health check attempt ${i + 1}/${maxRetries} for ${serviceName}`);
 
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
 
-        // Try multiple endpoints - n8n might use different health endpoints
+        // Test multiple endpoints - n8n may use different health endpoints
         const endpoints = ['/', '/rest/health', '/healthz', '/health'];
         let response: Response | null = null;
 
         for (const endpoint of endpoints) {
           try {
-            console.log(`[Docker] Trying endpoint: ${endpoint}`);
             response = await fetch(`${instanceUrl}${endpoint}`, {
               signal: controller.signal,
               headers: {
@@ -406,38 +406,33 @@ export class DockerService {
               }
             });
 
-            // If we get a 200 or any response that indicates n8n is running (not 404 or 502)
+            // Accept responses indicating service is operational
             if (response.status === 200 || response.status === 302 || (response.status >= 400 && response.status !== 404 && response.status !== 502)) {
-              console.log(`[Docker] ✅ N8N instance ${serviceName} responded with status ${response.status} on ${endpoint}`);
+              console.log(`[DOCKER] Service readiness confirmed for ${serviceName} (status: ${response.status})`);
               clearTimeout(timeoutId);
               return true;
             }
           } catch (endpointError: any) {
             // Continue to next endpoint
-            console.log(`[Docker] Endpoint ${endpoint} failed: ${endpointError.message}`);
           }
-        }
-
-        if (response) {
-          console.log(`[Docker] N8N health check returned status: ${response.status} (all endpoints)`);
         }
 
         clearTimeout(timeoutId);
       } catch (error: any) {
         if (error.name === 'AbortError') {
-          console.log(`[Docker] N8N health check timed out (attempt ${i + 1}/${maxRetries})`);
+          console.log(`[DOCKER] Health check timeout on attempt ${i + 1}/${maxRetries}`);
         } else {
-          console.log(`[Docker] N8N health check failed (attempt ${i + 1}/${maxRetries}): ${error.message}`);
+          console.log(`[DOCKER] Health check error on attempt ${i + 1}/${maxRetries}: ${error.message}`);
         }
       }
 
-      // Esperar antes del siguiente intento
+      // Wait before next attempt
       if (i < maxRetries - 1) {
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
 
-    console.log(`[Docker] ❌ N8N instance ${serviceName} failed to become ready after ${maxRetries} attempts`);
+    console.log(`[DOCKER] Service readiness verification failed after ${maxRetries} attempts for ${serviceName}`);
     return false;
   }
 
