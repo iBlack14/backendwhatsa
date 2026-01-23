@@ -102,9 +102,6 @@ export class DockerService {
           NanoCpus: cpu * 1000000,
           RestartPolicy: { Name: 'unless-stopped' },
           Binds: [`${serviceName}-data:/home/node/.n8n`],
-          PortBindings: {
-            '5678/tcp': [{ HostPort: '0' }] // Exponer puerto 5678 aleatoriamente
-          }
         },
         NetworkingConfig: {
           EndpointsConfig: {
@@ -122,29 +119,23 @@ export class DockerService {
       // Iniciar contenedor
       await container.start();
 
-      // Obtener información del contenedor para el puerto
+      // Obtener información del contenedor
       const containerInfo = await container.inspect();
-      const port = containerInfo.NetworkSettings.Ports?.['5678/tcp']?.[0]?.HostPort || '5678';
       const networkIP = containerInfo.NetworkSettings.Networks?.[NETWORK_NAME]?.IPAddress || 'unknown';
 
       console.log(`[Docker] ✅ Instance created and started: ${serviceName}`);
-      console.log(`[Docker] 📍 Port: ${port}`);
       console.log(`[Docker] 🌐 URL: https://${serviceName}.${BASE_DOMAIN}`);
       console.log(`[Docker] 🔗 Network IP (${NETWORK_NAME}): ${networkIP}`);
 
-      // En desarrollo, usar IP del host o dominio configurado
-      const isDev = process.env.NODE_ENV !== 'production';
-      const hostDomain = process.env.DEV_HOST_DOMAIN || process.env.HOST_DOMAIN || 'localhost';
-      const publicUrl = isDev
-        ? `http://${hostDomain}:${port}`
-        : `https://${serviceName}.${BASE_DOMAIN}`;
+      // Siempre usar HTTPS con Traefik en producción
+      const publicUrl = `https://${serviceName}.${BASE_DOMAIN}`;
 
       return {
         success: true,
         containerId: container.id,
         url: publicUrl,
-        urlInterna: `http://localhost:${port}`,
-        port: port,
+        urlInterna: `http://${networkIP}:5678`,
+        port: '5678',
         credentials: {
           url: publicUrl,
           setup_required: true,
