@@ -407,13 +407,17 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
               const buffer = await downloadMediaMessage(msg, 'buffer', {});
               mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
             } else if (messageType === 'audio' && msg.message?.audioMessage) {
+              console.log(`[WHATSAPP] Processing standard audio message...`);
               fileName = `audio_${Date.now()}.mp3`;
-              mimeType = msg.message.audioMessage.mimetype || 'audio/mpeg';
+              // Force simplified mimeType for storage compatibility
+              mimeType = 'audio/mpeg';
               const buffer = await downloadMediaMessage(msg, 'buffer', {});
               mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
             } else if (messageType === 'voice' && msg.message?.audioMessage) {
+              console.log(`[WHATSAPP] Processing voice note (PTT)...`);
               fileName = `voice_${Date.now()}.ogg`;
-              mimeType = msg.message.audioMessage.mimetype || 'audio/ogg';
+              // Force simplified mimeType for storage compatibility (fix for 'audio/ogg; codecs=opus' rejection)
+              mimeType = 'audio/ogg';
               const buffer = await downloadMediaMessage(msg, 'buffer', {});
               mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
             } else if (messageType === 'document' && msg.message?.documentMessage) {
