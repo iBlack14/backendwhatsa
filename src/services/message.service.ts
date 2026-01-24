@@ -60,7 +60,7 @@ export class MessageService {
       // 1. Guardar el mensaje
       const { error } = await supabase
         .from('messages')
-        .insert({
+        .upsert({
           instance_id: message.instance_id,
           chat_id: message.chat_id,
           message_id: message.message_id,
@@ -74,7 +74,7 @@ export class MessageService {
           timestamp: message.timestamp.toISOString(),
           is_read: message.is_read,
           metadata: message.metadata,
-        });
+        }, { onConflict: 'message_id' });
 
       if (error) {
         console.error('Error saving message:', error);

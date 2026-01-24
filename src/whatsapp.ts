@@ -681,6 +681,12 @@ export async function restoreAllSessions(): Promise<void> {
 
     if (error) {
       console.error('❌ Error fetching sessions from Supabase:', error);
+      // Check if it's a connection error (e.g. invalid URL or network issue)
+      if (error.message && (error.message.includes('fetch failed') || error.message.includes('ENOTFOUND'))) {
+        console.error('⚠️  HINT: Check your SUPABASE_URL and network connectivity.');
+        const supabaseUrl = process.env.SUPABASE_URL;
+        console.error(`⚠️  Current SUPABASE_URL: ${supabaseUrl ? supabaseUrl.replace(/:[^:]*@/, ':****@') : 'NOT SET'}`);
+      }
       return;
     }
 

@@ -42,6 +42,9 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// ✅ Trust Proxy for Docker/Reverse Proxy (Easypanel)
+app.set('trust proxy', 1);
+
 // Rate limiting general - DESHABILITADO para permitir envío/recepción ilimitada de mensajes
 // app.use('/api/', generalLimiter);
 
