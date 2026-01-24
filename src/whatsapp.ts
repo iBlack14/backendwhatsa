@@ -17,6 +17,7 @@ import { createClient } from '@supabase/supabase-js';
 import { useSupabaseAuthState } from './auth/SupabaseAuthState';
 import { wsService } from './websocket';
 import { supabase } from './lib/supabase';
+import { whatsappLogger } from './utils/logger';
 
 const sessions = new Map<string, WhatsAppSession>();
 
@@ -199,11 +200,11 @@ async function getInstanceWebhookUrl(instanceId: string): Promise<string | null>
 
 export async function createWhatsAppSession(clientId: string): Promise<void> {
   if (sessions.has(clientId)) {
-    console.log(`[WHATSAPP] Session ${clientId} already active`);
+    whatsappLogger.debug({ clientId }, 'Session already active');
     return;
   }
 
-  console.log(`[WHATSAPP] Initializing session for ${clientId}...`);
+  whatsappLogger.info({ clientId }, 'Initializing session');
 
   // Usar autenticación basada en Supabase
   const { state, saveCreds } = await useSupabaseAuthState(clientId);
@@ -213,15 +214,16 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
   let agent = undefined;
 
   if (proxy) {
-    console.log(`[WHATSAPP] Using proxy configuration: ${proxy.name} (${proxy.type}://${proxy.host}:${proxy.port})`);
+    whatsappLogger.info({ clientId, proxy: proxy.name }, 'Using proxy configuration');
     agent = proxyService.createProxyAgent(proxy);
   } else {
-    console.log(`[WHATSAPP] No proxy configured for instance ${clientId}`);
+    whatsappLogger.debug({ clientId }, 'No proxy configured');
   }
 
   const sock = makeWASocket({
     auth: state,
     browser: ['Chrome (Linux)', '', ''],
+    logger: whatsappLogger.child({ clientId }, { level: 'fatal' }), // Silenciar logs de Baileys
     // Configuración adicional para mejorar conexión
     connectTimeoutMs: 60000,
     defaultQueryTimeoutMs: 60000,
@@ -244,33 +246,27 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
     const { connection, lastDisconnect, qr } = update;
 
     if (qr) {
-      console.log('\n' + '='.repeat(60));
-      console.log(`[WHATSAPP] QR CODE GENERATED FOR: ${clientId}`);
-      console.log('='.repeat(60));
-      console.log('Scan this QR code with WhatsApp to establish connection');
-      console.log('='.repeat(60) + '\n');
+      whatsappLogger.info({ clientId }, '📱 QR CODE GENERATED');
 
       // Generate terminal QR for debugging
       try {
         const qrTerminal = require('qrcode-terminal');
         qrTerminal.generate(qr, { small: true });
       } catch (e) {
-        console.log('[WHATSAPP] Terminal QR display not available');
+        // Silently fail
       }
 
       // Convert QR to base64 for frontend
-      console.log(`[WHATSAPP] Processing QR code for client delivery...`);
       const qrBase64 = await QRCode.toDataURL(qr);
       session.qr = qrBase64;
       session.state = 'Initializing';
 
-      console.log(`[WHATSAPP] Persisting QR code to database (${qrBase64.length} characters)...`);
       await updateInstanceInN8N(clientId, {
         state: 'Initializing',
         qr: qrBase64,
-        qr_loading: false, // QR is now ready for scanning
+        qr_loading: false,
       });
-      console.log(`[WHATSAPP] QR code saved successfully. Client should receive it within 1-2 seconds.`);
+      whatsappLogger.info({ clientId }, 'QR code saved to database');
     }
 
     if (connection === 'close') {
@@ -278,17 +274,12 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
         (lastDisconnect?.error as Boom)?.output?.statusCode !==
         DisconnectReason.loggedOut;
 
-      console.log(
-        `[WHATSAPP] Connection terminated for ${clientId}. Auto-reconnect: ${shouldReconnect}`
-      );
+      whatsappLogger.info({ clientId, shouldReconnect }, '🔴 Connection terminated');
 
       if (shouldReconnect) {
-        // Marcar sesión como desconectada antes de eliminar
         session.state = 'Disconnected';
-        // Eliminar sesión existente antes de reconectar
         sessions.delete(clientId);
-        console.log(`[WHATSAPP] Initiating automatic reconnection for ${clientId}...`);
-        // Pequeño delay para evitar race conditions
+        whatsappLogger.info({ clientId }, 'Initiating automatic reconnection');
         await new Promise(resolve => setTimeout(resolve, 1000));
         await createWhatsAppSession(clientId);
       } else {
