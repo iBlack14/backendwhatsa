@@ -10,14 +10,24 @@ import pino from 'pino';
  */
 const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
-  transport: process.env.NODE_ENV !== 'production' ? {
+  transport: {
     target: 'pino-pretty',
     options: {
       colorize: true,
-      translateTime: 'HH:MM:ss Z',
+      translateTime: 'HH:MM:ss',
       ignore: 'pid,hostname',
+      singleLine: false,
+      hideObject: false,
+      customPrettifiers: {
+        time: (timestamp: any) => `🕐 ${timestamp}`,
+      },
+      messageFormat: (log: any, messageKey: string) => {
+        const emoji = log.level === 30 ? '✅' : log.level === 40 ? '⚠️' : log.level === 50 ? '❌' : 'ℹ️';
+        const module = log.module ? `[${log.module.toUpperCase()}]` : '';
+        return `${emoji} ${module} ${log[messageKey]}`;
+      },
     },
-  } : undefined,
+  },
   base: {
     env: process.env.NODE_ENV || 'development',
   },
