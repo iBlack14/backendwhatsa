@@ -184,4 +184,39 @@ router.get('/stats/:instanceId', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * POST /api/messages/send-image
+ * Enviar imagen vía WhatsApp (soporta URL o Base64)
+ */
+router.post('/send-image', async (req: Request, res: Response) => {
+  try {
+    const { instanceId, chatId, file, message } = req.body;
+
+    if (!instanceId || !chatId || !file) {
+      return res.status(400).json({ error: 'Missing required fields: instanceId, chatId, file' });
+    }
+
+    const { getSession } = require('../whatsapp');
+    const session = getSession(instanceId);
+
+    if (!session || !session.sock) {
+      return res.status(400).json({ error: 'Instance not connected' });
+    }
+
+    const result = await messageService.sendImage(instanceId, chatId, file, message);
+
+    if (!result.success) {
+      return res.status(500).json({ error: result.error || 'Failed to send image' });
+    }
+
+    res.json({
+      success: true,
+      messageId: result.messageId,
+      message: 'Image sent successfully'
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;

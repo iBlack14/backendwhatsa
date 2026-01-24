@@ -404,6 +404,53 @@ export class MessageService {
       };
     }
   }
+
+  async sendImage(instanceId: string, chatId: string, imageUrl: string, caption?: string): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    try {
+      const { getSession } = require('../whatsapp');
+      const session = getSession(instanceId);
+
+      if (!session || !session.sock) {
+        return { success: false, error: 'Instance not connected' };
+      }
+
+      // Enviar imagen usando Baileys (soporta URL y Base64)
+      const sentMessage = await session.sock.sendMessage(chatId, {
+        image: { url: imageUrl },
+        caption: caption || ''
+      });
+
+      if (!sentMessage) {
+        return { success: false, error: 'Failed to send image' };
+      }
+
+      // Guardar el mensaje en la base de datos
+      const messageData: Message = {
+        instance_id: instanceId,
+        chat_id: chatId,
+        message_id: sentMessage.key.id || `msg_${Date.now()}`,
+        message_text: caption || '',
+        message_type: 'image',
+        media_url: imageUrl.startsWith('data:') ? undefined : imageUrl, // No guardar base64 gigante en media_url si es posible, o guardarlo si es necesario
+        from_me: true,
+        timestamp: new Date(),
+        is_read: false,
+      };
+
+      await this.saveMessage(messageData);
+
+      return {
+        success: true,
+        messageId: messageData.message_id
+      };
+    } catch (error: any) {
+      console.error('Error sending image:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to send image'
+      };
+    }
+  }
 }
 
 export const messageService = new MessageService();
