@@ -15,10 +15,9 @@ const logger = pino({
     options: {
       colorize: true,
       translateTime: 'HH:MM:ss',
-      ignore: 'pid,hostname',
+      ignore: 'pid,hostname,env,module,clientId,method,path,ip', // Ocultar campos extras
       singleLine: true,
-      levelFirst: false,
-      messageKey: 'msg',
+      messageFormat: '{msg}', // Solo el mensaje
     },
   },
   base: {

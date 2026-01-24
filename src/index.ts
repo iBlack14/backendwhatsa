@@ -52,8 +52,9 @@ app.set('trust proxy', 1);
 // Logging middleware con Pino - Filtrando endpoints ruidosos (polling)
 app.use((req, res, next) => {
   const isPolling = req.method === 'GET' && (
-    req.path.includes('/api/messages/chats/') ||
-    req.path.includes('@broadcast')
+    req.path.startsWith('/api/messages/') ||
+    req.path.includes('@broadcast') ||
+    req.path.includes('@lid')
   );
 
   if (!isPolling) {
