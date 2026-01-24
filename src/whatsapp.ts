@@ -405,7 +405,7 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
           const twoMinutesAgo = Date.now() - (2 * 60 * 1000);
 
           if (lastProcessed > twoMinutesAgo) {
-            console.log(`[WHATSAPP] ⏭️ Skipping duplicate message: ${messageId}`);
+            // console.log(`[WHATSAPP] ⏭️ Skipping duplicate message: ${messageId}`);
             continue; // Saltar este mensaje, ya fue procesado
           }
         }
