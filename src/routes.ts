@@ -12,7 +12,6 @@ import easypanelService from './services/easypanel.service';
 import { createClient } from '@supabase/supabase-js';
 import plansRouter from './routes/plans.routes';
 import proxiesRouter from './routes/proxies.routes';
-import maintenanceRoutes from './routes/maintenance.routes';
 import messagesRouter from './routes/messages.routes';
 import contactsRouter from './routes/contacts.routes';
 import { validateApiKey } from './middleware/auth.middleware';
@@ -143,7 +142,7 @@ router.post('/api/update-webhook/:clientId', async (req: Request, res: Response)
 // ✅ Montar rutas de mensajes y chats ANTES del middleware de API key
 // Messages routes
 router.use('/api/messages', messagesRouter);
-router.use('/api/maintenance', maintenanceRoutes);
+
 
 // Rutas que requieren API key (solo para funciones avanzadas)
 router.use(validateApiKey);

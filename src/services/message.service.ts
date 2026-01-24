@@ -57,7 +57,10 @@ export class MessageService {
    */
   async saveMessage(message: Message): Promise<boolean> {
     try {
-      // 1. Guardar el mensaje
+      // 1. PRIMERO: Asegurar que el chat existe (para evitar errores de Foreign Key)
+      await this.updateOrCreateChat(message);
+
+      // 2. LUEGO: Guardar el mensaje
       const { error } = await supabase
         .from('messages')
         .upsert({
@@ -82,10 +85,6 @@ export class MessageService {
       }
 
       console.log(`💾 Message saved: ${message.message_id}`);
-
-      // 2. Actualizar o crear el chat
-      await this.updateOrCreateChat(message);
-
       return true;
     } catch (error) {
       console.error('Error saving message:', error);
@@ -136,9 +135,20 @@ export class MessageService {
 
       let finalChatName = currentChat?.chat_name; // Por defecto: mantener el que existe
 
-      if (!message.from_me && message.sender_name) {
-        // Si viene un mensaje DDE ELLOS con nombre, ese es el nombre real. Actualizamos/Corregimos.
-        finalChatName = message.sender_name;
+      if (!message.from_me) {
+        // MENSAJE ENTRANTE (Lo que importa para el nombre del chat)
+
+        if (message.sender_name) {
+          const name = message.sender_name.trim();
+          // Validar: Que no sea ".", que no sea tu propio nombre común
+          const isBadName = name === '.' || name.toLowerCase().includes('alonso huancas');
+
+          if (!isBadName) {
+            finalChatName = name; // Nombre válido, lo usamos
+          }
+        }
+
+        // Si no tenemos nombre válido y no hay nombre previo, el fallback final será el número (abajo)
       }
 
       if (!finalChatName) {
