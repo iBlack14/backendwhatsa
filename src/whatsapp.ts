@@ -71,6 +71,14 @@ async function uploadMediaToSupabase(
 function extractMessageText(message: any): string | undefined {
   if (!message) return undefined;
 
+  // Manejar mensajes de "Ver una vez" (View Once)
+  if (message.viewOnceMessage || message.viewOnceMessageV2 || message.viewOnceMessageV2Extension) {
+    const inner = message.viewOnceMessage?.message ||
+      message.viewOnceMessageV2?.message ||
+      message.viewOnceMessageV2Extension?.message;
+    return extractMessageText(inner);
+  }
+
   // Texto simple
   if (message.conversation) return message.conversation;
 
@@ -144,6 +152,15 @@ function extractMessageText(message: any): string | undefined {
  */
 function detectMessageType(message: any): string {
   if (!message) return 'text';
+
+  // Detectar "Ver una vez" (View Once)
+  if (message.viewOnceMessage || message.viewOnceMessageV2 || message.viewOnceMessageV2Extension) {
+    const inner = message.viewOnceMessage?.message ||
+      message.viewOnceMessageV2?.message ||
+      message.viewOnceMessageV2Extension?.message;
+    if (inner?.imageMessage) return 'view_once_image';
+    if (inner?.videoMessage) return 'view_once_video';
+  }
 
   // Detectar tipos específicos de Baileys
   if (message.conversation) return 'text';
@@ -385,40 +402,44 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
           let fileName = undefined;
           let mimeType = undefined;
 
+          // Obtener el contenido real (normal o view once)
+          const content = msg.message?.viewOnceMessage?.message ||
+            msg.message?.viewOnceMessageV2?.message ||
+            msg.message?.viewOnceMessageV2Extension?.message ||
+            msg.message;
+
           // Descargar media si existe
           try {
-            if (messageType === 'image' && msg.message?.imageMessage) {
-              fileName = (msg.message.imageMessage as any).fileName || `image_${Date.now()}.jpg`;
-              mimeType = msg.message.imageMessage.mimetype || 'image/jpeg';
+            if ((messageType === 'image' || messageType === 'view_once_image') && content?.imageMessage) {
+              fileName = (content.imageMessage as any).fileName || `image_${Date.now()}.jpg`;
+              mimeType = content.imageMessage.mimetype || 'image/jpeg';
               const buffer = await downloadMediaMessage(msg, 'buffer', {});
               mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
-            } else if (messageType === 'video' && msg.message?.videoMessage) {
-              fileName = (msg.message.videoMessage as any).fileName || `video_${Date.now()}.mp4`;
-              mimeType = msg.message.videoMessage.mimetype || 'video/mp4';
+            } else if ((messageType === 'video' || messageType === 'view_once_video') && content?.videoMessage) {
+              fileName = (content.videoMessage as any).fileName || `video_${Date.now()}.mp4`;
+              mimeType = content.videoMessage.mimetype || 'video/mp4';
               const buffer = await downloadMediaMessage(msg, 'buffer', {});
               mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
-            } else if (messageType === 'audio' && msg.message?.audioMessage) {
+            } else if (messageType === 'audio' && content?.audioMessage) {
               console.log(`[WHATSAPP] Processing standard audio message...`);
               fileName = `audio_${Date.now()}.mp3`;
-              // Force simplified mimeType for storage compatibility
               mimeType = 'audio/mpeg';
               const buffer = await downloadMediaMessage(msg, 'buffer', {});
               mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
-            } else if (messageType === 'voice' && msg.message?.audioMessage) {
+            } else if (messageType === 'voice' && content?.audioMessage) {
               console.log(`[WHATSAPP] Processing voice note (PTT)...`);
               fileName = `voice_${Date.now()}.ogg`;
-              // Force simplified mimeType for storage compatibility (fix for 'audio/ogg; codecs=opus' rejection)
               mimeType = 'audio/ogg';
               const buffer = await downloadMediaMessage(msg, 'buffer', {});
               mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
-            } else if (messageType === 'document' && msg.message?.documentMessage) {
-              fileName = (msg.message.documentMessage as any).fileName || `document_${Date.now()}`;
-              mimeType = msg.message.documentMessage.mimetype || 'application/octet-stream';
+            } else if (messageType === 'document' && content?.documentMessage) {
+              fileName = content.documentMessage.fileName || `document_${Date.now()}`;
+              mimeType = content.documentMessage.mimetype || 'application/octet-stream';
               const buffer = await downloadMediaMessage(msg, 'buffer', {});
               mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
-            } else if (messageType === 'sticker' && msg.message?.stickerMessage) {
+            } else if (messageType === 'sticker' && content?.stickerMessage) {
               fileName = `sticker_${Date.now()}.webp`;
-              mimeType = msg.message.stickerMessage.mimetype || 'image/webp';
+              mimeType = content.stickerMessage.mimetype || 'image/webp';
               const buffer = await downloadMediaMessage(msg, 'buffer', {});
               mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
             }
