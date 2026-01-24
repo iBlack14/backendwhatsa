@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS public.profiles (
   plan_expires_at TIMESTAMPTZ,
   created_by_google BOOLEAN DEFAULT false,
   api_key TEXT,
+  openai_api_key TEXT,
+  gemini_api_key TEXT,
   must_change_password BOOLEAN DEFAULT false,
   temp_password TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW(),
