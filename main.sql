@@ -98,6 +98,8 @@ CREATE TABLE IF NOT EXISTS public.instances (
   user_id UUID NOT NULL,
   webhook_url TEXT,
   state TEXT DEFAULT 'Initializing' CHECK (state IN ('Initializing', 'Connected', 'Disconnected', 'Failure')),
+  active_template TEXT DEFAULT 'none' CHECK (active_template IN ('none', 'spam', 'chatbot', 'calentamiento')),
+  template_config JSONB DEFAULT '{}'::jsonb,
   is_active BOOLEAN DEFAULT true,
   message_received BOOLEAN DEFAULT false,
   message_sent BOOLEAN DEFAULT false,
