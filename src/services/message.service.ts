@@ -128,6 +128,24 @@ export class MessageService {
         ? (message.from_me ? currentChat.unread_count : currentChat.unread_count + 1)
         : (message.from_me ? 0 : 1);
 
+      // LÓGICA DE NOMBRE DE CHAT CORREGIDA:
+      // 1. Si es mensaje ENTRANTE (!from_me) y tiene nombre, usamos ese nombre (CORRIGE nombres erróneos y actualiza contactos).
+      // 2. Si ya existe un nombre en DB y no tenemos uno mejor entrante, lo conservamos.
+      // 3. Si no hay nada, usamos el ID/Número.
+      // ⚠️ IMPORTANTE: Nunca usar message.sender_name si from_me=true, porque ese es TU nombre (ej. "Alonso"), no el del contacto.
+
+      let finalChatName = currentChat?.chat_name; // Por defecto: mantener el que existe
+
+      if (!message.from_me && message.sender_name) {
+        // Si viene un mensaje DDE ELLOS con nombre, ese es el nombre real. Actualizamos/Corregimos.
+        finalChatName = message.sender_name;
+      }
+
+      if (!finalChatName) {
+        // Si aún no tenemos nombre (nuevo chat outgoing sin respuesta aun), usamos el número.
+        finalChatName = message.chat_id.split('@')[0];
+      }
+
       const upsertData = {
         instance_id: message.instance_id,
         chat_id: message.chat_id,
@@ -135,8 +153,7 @@ export class MessageService {
         last_message_text: chatData.last_message_text,
         last_message_at: chatData.last_message_at,
         unread_count: newUnreadCount,
-        // Solo actualizar nombre/foto si no existen o si queremos forzar (aquí conservamos lógica original de preservar nombre existente)
-        chat_name: currentChat?.chat_name || chatData.chat_name,
+        chat_name: finalChatName,
         profile_pic_url: message.profile_pic_url || currentChat?.profile_pic_url,
       };
 
