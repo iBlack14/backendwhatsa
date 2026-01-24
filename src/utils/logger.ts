@@ -16,16 +16,9 @@ const logger = pino({
       colorize: true,
       translateTime: 'HH:MM:ss',
       ignore: 'pid,hostname',
-      singleLine: false,
-      hideObject: false,
-      customPrettifiers: {
-        time: (timestamp: any) => `🕐 ${timestamp}`,
-      },
-      messageFormat: (log: any, messageKey: string) => {
-        const emoji = log.level === 30 ? '✅' : log.level === 40 ? '⚠️' : log.level === 50 ? '❌' : 'ℹ️';
-        const module = log.module ? `[${log.module.toUpperCase()}]` : '';
-        return `${emoji} ${module} ${log[messageKey]}`;
-      },
+      singleLine: true,
+      levelFirst: false,
+      messageKey: 'msg',
     },
   },
   base: {
