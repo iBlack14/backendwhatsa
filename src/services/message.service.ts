@@ -173,11 +173,17 @@ export class MessageService {
    */
   async getMessages(instanceId: string, chatId: string, limit: number = 50): Promise<Message[]> {
     try {
+      // Normalizar IDs para buscar ambas versiones (con y sin sufijo)
+      const cleanId = chatId.replace('@s.whatsapp.net', '').replace('@g.us', '');
+      const pattern = chatId.includes('@g.us')
+        ? `chat_id.eq.${chatId}` // Grupos usan ID exacto usualmente
+        : `chat_id.eq.${cleanId},chat_id.eq.${cleanId}@s.whatsapp.net`; // Individuall: buscar ambos
+
       const { data, error } = await supabase
         .from('messages')
         .select('*')
         .eq('instance_id', instanceId)
-        .eq('chat_id', chatId)
+        .or(pattern)
         .order('timestamp', { ascending: false })
         .limit(limit);
 
