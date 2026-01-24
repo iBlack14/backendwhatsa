@@ -451,6 +451,54 @@ export class MessageService {
       };
     }
   }
+
+  async sendAudio(instanceId: string, chatId: string, audioUrl: string): Promise<{ success: boolean; messageId?: string; error?: string }> {
+    try {
+      const { getSession } = require('../whatsapp');
+      const session = getSession(instanceId);
+
+      if (!session || !session.sock) {
+        return { success: false, error: 'Instance not connected' };
+      }
+
+      // Enviar audio como nota de voz (PTT)
+      const sentMessage = await session.sock.sendMessage(chatId, {
+        audio: { url: audioUrl },
+        mimetype: 'audio/mp4', // Baileys prefiere mp4 para PTT
+        ptt: true
+      });
+
+      if (!sentMessage) {
+        return { success: false, error: 'Failed to send audio' };
+      }
+
+      // Guardar el mensaje en la base de datos
+      const messageData: Message = {
+        instance_id: instanceId,
+        chat_id: chatId,
+        message_id: sentMessage.key.id || `msg_${Date.now()}`,
+        message_text: '',
+        message_type: 'voice',
+        media_url: audioUrl.startsWith('data:') ? undefined : audioUrl,
+        from_me: true,
+        timestamp: new Date(),
+        is_read: false,
+      };
+
+      await this.saveMessage(messageData);
+
+      return {
+        success: true,
+        messageId: messageData.message_id
+      };
+    } catch (error: any) {
+      console.error('Error sending audio:', error);
+      return {
+        success: false,
+        error: error.message || 'Failed to send audio'
+      };
+    }
+  }
 }
 
 export const messageService = new MessageService();

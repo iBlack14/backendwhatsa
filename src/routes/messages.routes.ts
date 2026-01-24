@@ -219,4 +219,39 @@ router.post('/send-image', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * POST /api/messages/send-audio
+ * Enviar audio/nota de voz vía WhatsApp (soporta URL o Base64)
+ */
+router.post('/send-audio', async (req: Request, res: Response) => {
+  try {
+    const { instanceId, chatId, file } = req.body;
+
+    if (!instanceId || !chatId || !file) {
+      return res.status(400).json({ error: 'Missing required fields: instanceId, chatId, file' });
+    }
+
+    const { getSession } = require('../whatsapp');
+    const session = getSession(instanceId);
+
+    if (!session || !session.sock) {
+      return res.status(400).json({ error: 'Instance not connected' });
+    }
+
+    const result = await messageService.sendAudio(instanceId, chatId, file);
+
+    if (!result.success) {
+      return res.status(500).json({ error: result.error || 'Failed to send audio' });
+    }
+
+    res.json({
+      success: true,
+      messageId: result.messageId,
+      message: 'Audio sent successfully'
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;
