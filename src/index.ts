@@ -49,9 +49,16 @@ app.set('trust proxy', 1);
 // Rate limiting general - DESHABILITADO para permitir envío/recepción ilimitada de mensajes
 // app.use('/api/', generalLimiter);
 
-// Logging middleware con Pino
+// Logging middleware con Pino - Filtrando endpoints ruidosos (polling)
 app.use((req, res, next) => {
-  loggers.apiRequest(req.method, req.path, req.ip);
+  const isPolling = req.method === 'GET' && (
+    req.path.includes('/api/messages/chats/') ||
+    req.path.includes('@broadcast')
+  );
+
+  if (!isPolling) {
+    loggers.apiRequest(req.method, req.path, req.ip);
+  }
   next();
 });
 

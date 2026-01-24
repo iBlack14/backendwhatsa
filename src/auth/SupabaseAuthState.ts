@@ -6,7 +6,7 @@ import {
     BufferJSON,
     proto
 } from '@whiskeysockets/baileys';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { supabase } from '../lib/supabase';
 
 // Definir tipos para las claves de sesión
 type SessionData = {
@@ -16,14 +16,7 @@ type SessionData = {
 };
 
 export const useSupabaseAuthState = async (sessionId: string): Promise<{ state: AuthenticationState, saveCreds: () => Promise<void> }> => {
-    const supabaseUrl = process.env.SUPABASE_URL;
-    const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
-
-    if (!supabaseUrl || !supabaseKey) {
-        throw new Error('Supabase credentials not configured (SUPABASE_URL, SUPABASE_SERVICE_KEY)');
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseKey);
+    // const supabaseUrl = process.env.SUPABASE_URL; // Removed local config
     const tableName = 'whatsapp_sessions';
 
     // Función helper para leer datos
