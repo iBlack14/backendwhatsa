@@ -64,81 +64,80 @@ async function uploadMediaToSupabase(
 }
 
 /**
+ * Desempaqueta mensajes de wrappers como ephemeralMessage, viewOnceMessage, etc.
+ * @param message - Objeto de mensaje de Baileys
+ * @returns Mensaje real desempaquetado
+ */
+function getRealMessage(message: any): any {
+  if (!message) return undefined;
+  if (message.ephemeralMessage) return getRealMessage(message.ephemeralMessage.message);
+  if (message.viewOnceMessage) return getRealMessage(message.viewOnceMessage.message);
+  if (message.viewOnceMessageV2) return getRealMessage(message.viewOnceMessageV2.message);
+  if (message.viewOnceMessageV2Extension) return getRealMessage(message.viewOnceMessageV2Extension.message);
+  if (message.deviceSentMessage) return getRealMessage(message.deviceSentMessage.message);
+  return message;
+}
+
+/**
  * Extraer texto completo del mensaje
  * @param message - Objeto de mensaje de Baileys
  * @returns Texto del mensaje o undefined
  */
 function extractMessageText(message: any): string | undefined {
-  if (!message) return undefined;
-
-  // Manejar mensajes de "Ver una vez" (View Once)
-  if (message.viewOnceMessage || message.viewOnceMessageV2 || message.viewOnceMessageV2Extension) {
-    const inner = message.viewOnceMessage?.message ||
-      message.viewOnceMessageV2?.message ||
-      message.viewOnceMessageV2Extension?.message;
-    return extractMessageText(inner);
-  }
+  const realMessage = getRealMessage(message);
+  if (!realMessage) return undefined;
 
   // Texto simple
-  if (message.conversation) return message.conversation;
+  if (realMessage.conversation) return realMessage.conversation;
 
   // Texto extendido (con formato, links, menciones, etc)
-  if (message.extendedTextMessage?.text) return message.extendedTextMessage.text;
+  if (realMessage.extendedTextMessage?.text) return realMessage.extendedTextMessage.text;
 
   // Caption de imagen
-  if (message.imageMessage?.caption) return message.imageMessage.caption;
+  if (realMessage.imageMessage?.caption) return realMessage.imageMessage.caption;
 
   // Caption de video
-  if (message.videoMessage?.caption) return message.videoMessage.caption;
+  if (realMessage.videoMessage?.caption) return realMessage.videoMessage.caption;
 
   // Caption de documento
-  if (message.documentMessage?.caption) return message.documentMessage.caption;
+  if (realMessage.documentMessage?.caption) return realMessage.documentMessage.caption;
 
-  // Respuesta de botón
-  if (message.buttonsResponseMessage?.selectedButtonId) {
-    return `Botón: ${message.buttonsResponseMessage.selectedDisplayText || message.buttonsResponseMessage.selectedButtonId}`;
+  // Respuestas de botones y listas...
+  if (realMessage.buttonsResponseMessage?.selectedButtonId) {
+    return `Botón: ${realMessage.buttonsResponseMessage.selectedDisplayText || realMessage.buttonsResponseMessage.selectedButtonId}`;
   }
 
-  // Respuesta de lista
-  if (message.listResponseMessage?.singleSelectReply?.selectedRowId) {
-    return `Lista: ${message.listResponseMessage.title || message.listResponseMessage.singleSelectReply.selectedRowId}`;
+  if (realMessage.listResponseMessage?.singleSelectReply?.selectedRowId) {
+    return `Lista: ${realMessage.listResponseMessage.title || realMessage.listResponseMessage.singleSelectReply.selectedRowId}`;
   }
 
-  // Template button reply
-  if (message.templateButtonReplyMessage?.selectedId) {
-    return `Botón: ${message.templateButtonReplyMessage.selectedDisplayText || message.templateButtonReplyMessage.selectedId}`;
+  if (realMessage.templateButtonReplyMessage?.selectedId) {
+    return `Botón: ${realMessage.templateButtonReplyMessage.selectedDisplayText || realMessage.templateButtonReplyMessage.selectedId}`;
   }
 
-  // Ubicación
-  if (message.locationMessage) {
-    const lat = message.locationMessage.degreesLatitude;
-    const lng = message.locationMessage.degreesLongitude;
-    return `📍 Ubicación: ${lat}, ${lng}`;
+  // Ubicación, Contactos, etc.
+  if (realMessage.locationMessage) {
+    return `📍 Ubicación: ${realMessage.locationMessage.degreesLatitude}, ${realMessage.locationMessage.degreesLongitude}`;
   }
 
-  // Contacto
-  if (message.contactMessage) {
-    return `👤 Contacto: ${message.contactMessage.displayName || 'Sin nombre'}`;
+  if (realMessage.contactMessage) {
+    return `👤 Contacto: ${realMessage.contactMessage.displayName || 'Sin nombre'}`;
   }
 
-  // Contactos múltiples
-  if (message.contactsArrayMessage) {
-    const count = message.contactsArrayMessage.contacts?.length || 0;
+  if (realMessage.contactsArrayMessage) {
+    const count = realMessage.contactsArrayMessage.contacts?.length || 0;
     return `👥 ${count} contacto(s)`;
   }
 
-  // Reacción
-  if (message.reactionMessage) {
-    return `${message.reactionMessage.text} (reacción)`;
+  if (realMessage.reactionMessage) {
+    return `${realMessage.reactionMessage.text} (reacción)`;
   }
 
-  // Poll/Encuesta
-  if (message.pollCreationMessage) {
-    return `📊 Encuesta: ${message.pollCreationMessage.name}`;
+  if (realMessage.pollCreationMessage) {
+    return `📊 Encuesta: ${realMessage.pollCreationMessage.name}`;
   }
 
-  // Sticker (emoji o descripción)
-  if (message.stickerMessage) {
+  if (realMessage.stickerMessage) {
     return '🎨 Sticker';
   }
 
@@ -153,40 +152,38 @@ function extractMessageText(message: any): string | undefined {
 function detectMessageType(message: any): string {
   if (!message) return 'text';
 
-  // Detectar "Ver una vez" (View Once)
-  if (message.viewOnceMessage || message.viewOnceMessageV2 || message.viewOnceMessageV2Extension) {
-    const inner = message.viewOnceMessage?.message ||
-      message.viewOnceMessageV2?.message ||
-      message.viewOnceMessageV2Extension?.message;
-    if (inner?.imageMessage) return 'view_once_image';
-    if (inner?.videoMessage) return 'view_once_video';
+  // Primero detectamos si es "Ver una vez" inspeccionando los wrappers
+  const isViewOnce = message.viewOnceMessage || message.viewOnceMessageV2 || message.viewOnceMessageV2Extension ||
+    (message.ephemeralMessage?.message?.viewOnceMessage || message.ephemeralMessage?.message?.viewOnceMessageV2);
+
+  const realMessage = getRealMessage(message);
+  if (!realMessage) return 'text';
+
+  if (isViewOnce) {
+    if (realMessage.imageMessage) return 'view_once_image';
+    if (realMessage.videoMessage) return 'view_once_video';
   }
 
-  // Detectar tipos específicos de Baileys
-  if (message.conversation) return 'text';
-  if (message.extendedTextMessage) return 'text';
-  if (message.imageMessage) return 'image';
-  if (message.videoMessage) return 'video';
-  if (message.audioMessage) {
-    // Diferenciar entre audio y nota de voz
-    return message.audioMessage.ptt ? 'voice' : 'audio';
+  // Detectar tipos específicos del mensaje desempaquetado
+  if (realMessage.conversation || realMessage.extendedTextMessage) return 'text';
+  if (realMessage.imageMessage) return 'image';
+  if (realMessage.videoMessage) return 'video';
+  if (realMessage.audioMessage) {
+    return realMessage.audioMessage.ptt ? 'voice' : 'audio';
   }
-  if (message.documentMessage) return 'document';
-  if (message.stickerMessage) return 'sticker';
-  if (message.locationMessage) return 'location';
-  if (message.liveLocationMessage) return 'location';
-  if (message.contactMessage) return 'contact';
-  if (message.contactsArrayMessage) return 'contacts';
-  if (message.buttonsResponseMessage) return 'button_reply';
-  if (message.templateButtonReplyMessage) return 'button_reply';
-  if (message.listResponseMessage) return 'list_reply';
-  if (message.reactionMessage) return 'reaction';
-  if (message.pollCreationMessage) return 'poll';
-  if (message.pollUpdateMessage) return 'poll_update';
+  if (realMessage.documentMessage) return 'document';
+  if (realMessage.stickerMessage) return 'sticker';
+  if (realMessage.locationMessage || realMessage.liveLocationMessage) return 'location';
+  if (realMessage.contactMessage) return 'contact';
+  if (realMessage.contactsArrayMessage) return 'contacts';
+  if (realMessage.buttonsResponseMessage || realMessage.templateButtonReplyMessage) return 'button_reply';
+  if (realMessage.listResponseMessage) return 'list_reply';
+  if (realMessage.reactionMessage) return 'reaction';
+  if (realMessage.pollCreationMessage) return 'poll';
+  if (realMessage.pollUpdateMessage) return 'poll_update';
 
-  // Si no se detecta, retornar el primer key como fallback
-  const keys = Object.keys(message);
-  return keys.length > 0 ? keys[0].replace('Message', '') : 'unknown';
+  const keys = Object.keys(realMessage);
+  return keys.length > 0 ? keys[0].replace('Message', '').toLowerCase() : 'unknown';
 }
 
 /**
@@ -402,11 +399,8 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
           let fileName = undefined;
           let mimeType = undefined;
 
-          // Obtener el contenido real (normal o view once)
-          const content = msg.message?.viewOnceMessage?.message ||
-            msg.message?.viewOnceMessageV2?.message ||
-            msg.message?.viewOnceMessageV2Extension?.message ||
-            msg.message;
+          // Obtener el contenido real desempaquetado de forma recursiva
+          const content = getRealMessage(msg.message);
 
           // Descargar media si existe
           try {
