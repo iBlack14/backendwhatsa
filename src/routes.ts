@@ -142,8 +142,8 @@ router.post('/api/update-webhook/:clientId', async (req: Request, res: Response)
 
 // ✅ Montar rutas de mensajes y chats ANTES del middleware de API key
 // Messages routes
-router.use('/messages', messagesRouter);
-router.use('/maintenance', maintenanceRoutes);
+router.use('/api/messages', messagesRouter);
+router.use('/api/maintenance', maintenanceRoutes);
 
 // Rutas que requieren API key (solo para funciones avanzadas)
 router.use(validateApiKey);
