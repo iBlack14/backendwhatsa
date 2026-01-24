@@ -21,6 +21,20 @@ import { whatsappLogger } from './utils/logger';
 
 const sessions = new Map<string, WhatsAppSession>();
 
+// 🛡️ Cache para evitar duplicación de mensajes
+// Estructura: messageId -> timestamp cuando fue procesado
+const processedMessages = new Map<string, number>();
+
+// Limpiar mensajes procesados cada 5 minutos (mantener solo los últimos 5 minutos)
+setInterval(() => {
+  const fiveMinutesAgo = Date.now() - (5 * 60 * 1000);
+  for (const [messageId, timestamp] of processedMessages.entries()) {
+    if (timestamp < fiveMinutesAgo) {
+      processedMessages.delete(messageId);
+    }
+  }
+}, 5 * 60 * 1000); // Cada 5 minutos
+
 /**
  * Subir archivo de media a Supabase Storage
  */
@@ -385,6 +399,22 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
         const remoteJid = msg.key.remoteJid;
         const messageId = msg.key.id;
 
+        // 🛡️ ANTI-DUPLICACIÓN: Verificar si este mensaje ya fue procesado recientemente
+        if (messageId && processedMessages.has(messageId)) {
+          const lastProcessed = processedMessages.get(messageId)!;
+          const twoMinutesAgo = Date.now() - (2 * 60 * 1000);
+
+          if (lastProcessed > twoMinutesAgo) {
+            console.log(`[WHATSAPP] ⏭️ Skipping duplicate message: ${messageId}`);
+            continue; // Saltar este mensaje, ya fue procesado
+          }
+        }
+
+        // Marcar mensaje como procesado
+        if (messageId) {
+          processedMessages.set(messageId, Date.now());
+        }
+
         console.log(`[WHATSAPP] ${fromMe ? 'Outbound' : 'Inbound'} message from ${remoteJid}`);
 
         // Persist message to database
@@ -395,6 +425,10 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
 
           console.log(`[WHATSAPP] Raw keys: ${JSON.stringify(Object.keys(msg.message || {}))}`);
           console.log(`[WHATSAPP] Detected type: ${messageType}`);
+          // 🔐 Log especial para mensajes "Ver una vez"
+          if (messageType.startsWith('view_once')) {
+            console.log(`[WHATSAPP] 🔐 VIEW ONCE MESSAGE DETECTED - This message can only be viewed once!`);
+          }
           if (messageText) {
             console.log(`[WHATSAPP] Content: ${messageText.substring(0, 50)}${messageText.length > 50 ? '...' : ''}`);
           }
@@ -469,6 +503,9 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
             console.log(`[WHATSAPP] Contact profile image not available for ${remoteJid}`);
           }
 
+          // 🔐 Detectar si es mensaje "Ver una vez"
+          const isViewOnce = messageType.startsWith('view_once');
+
           const savedMessage = {
             instance_id: clientId,
             chat_id: remoteJid || '',
@@ -484,6 +521,8 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
             is_read: fromMe || false,
             metadata: { ...msg, fileName },
             profile_pic_url: profilePicUrl,
+            is_view_once: isViewOnce,  // 🔐 Marcar como "ver una vez"
+            view_once_opened_times: [],  // Array vacío - se llenará cuando se abra
           };
 
           await messageService.saveMessage(savedMessage);

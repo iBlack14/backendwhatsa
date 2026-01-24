@@ -254,4 +254,63 @@ router.post('/send-audio', async (req: Request, res: Response) => {
   }
 });
 
+/**
+ * POST /api/messages/mark-viewed
+ * Marcar mensaje "Ver una vez" como visto
+ * Permite múltiples aperturas - agrega timestamp cada vez que se abre
+ */
+router.post('/mark-viewed', async (req: Request, res: Response) => {
+  try {
+    const { messageId } = req.body;
+
+    if (!messageId) {
+      return res.status(400).json({ error: 'Missing messageId' });
+    }
+
+    // Obtener el mensaje actual
+    const { data: message, error: fetchError } = await supabase
+      .from('messages')
+      .select('message_id, is_view_once, view_once_opened_times')
+      .eq('message_id', messageId)
+      .single();
+
+    if (fetchError || !message) {
+      return res.status(404).json({ error: 'Message not found' });
+    }
+
+    if (!message.is_view_once) {
+      return res.status(400).json({ error: 'Message is not a view once message' });
+    }
+
+    // Obtener array actual de timestamps (o crear uno vacío)
+    const currentTimes = Array.isArray(message.view_once_opened_times)
+      ? message.view_once_opened_times
+      : [];
+
+    // Agregar el nuevo timestamp
+    const newTimestamp = new Date().toISOString();
+    const updatedTimes = [...currentTimes, newTimestamp];
+
+    // Actualizar en la base de datos
+    const { error: updateError } = await supabase
+      .from('messages')
+      .update({ view_once_opened_times: updatedTimes })
+      .eq('message_id', messageId);
+
+    if (updateError) {
+      return res.status(500).json({ error: 'Failed to mark message as viewed' });
+    }
+
+    res.json({
+      success: true,
+      viewedAt: newTimestamp,
+      totalViews: updatedTimes.length,
+      allViewTimes: updatedTimes,
+      message: `View once message opened. Total opens: ${updatedTimes.length}`
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 export default router;

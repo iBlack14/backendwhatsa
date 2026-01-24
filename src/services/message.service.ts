@@ -19,6 +19,8 @@ export interface Message {
   is_read: boolean;
   metadata?: any;
   profile_pic_url?: string;
+  is_view_once?: boolean;  // Indica si es un mensaje "ver una vez"
+  view_once_opened_times?: Date[];  // Array de timestamps de cuándo se abrió
 }
 
 export interface Chat {
@@ -77,6 +79,8 @@ export class MessageService {
           timestamp: message.timestamp.toISOString(),
           is_read: message.is_read,
           metadata: message.metadata,
+          is_view_once: message.is_view_once,
+          view_once_opened_times: message.view_once_opened_times?.map(d => d.toISOString()) || [],
         }, { onConflict: 'message_id' });
 
       if (error) {
@@ -191,6 +195,8 @@ export class MessageService {
       contacts: '👥 Contactos',
       poll: '📊 Encuesta',
       reaction: '❤️ Reacción',
+      view_once_image: '🔐 Imagen (Ver una vez)',
+      view_once_video: '🔐 Video (Ver una vez)',
     };
     return labels[type] || '📎 Archivo';
   }

@@ -147,6 +147,8 @@ CREATE TABLE IF NOT EXISTS public.messages (
   timestamp TIMESTAMPTZ DEFAULT NOW(),
   is_read BOOLEAN DEFAULT false,
   metadata JSONB,
+  is_view_once BOOLEAN DEFAULT false,
+  view_once_opened_times JSONB DEFAULT '[]'::jsonb,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT messages_instance_id_fkey FOREIGN KEY (instance_id) REFERENCES public.instances(document_id) ON DELETE CASCADE
