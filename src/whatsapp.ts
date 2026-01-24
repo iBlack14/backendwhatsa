@@ -183,7 +183,15 @@ function detectMessageType(message: any): string {
   if (realMessage.pollUpdateMessage) return 'poll_update';
 
   const keys = Object.keys(realMessage);
-  return keys.length > 0 ? keys[0].replace('Message', '').toLowerCase() : 'unknown';
+  if (keys.length > 0) {
+    const key = keys[0];
+    if (key.includes('ViewOnce') || key.includes('viewOnce')) {
+      // Intento de fallback inteligente para view once (asumimos imagen por defecto si falla todo)
+      return 'view_once_image';
+    }
+    return key.replace('Message', '').toLowerCase();
+  }
+  return 'unknown';
 }
 
 /**
@@ -385,7 +393,8 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
           const messageText = extractMessageText(msg.message);
           const messageType = detectMessageType(msg.message);
 
-          console.log(`[WHATSAPP] Message type: ${messageType}`);
+          console.log(`[WHATSAPP] Raw keys: ${JSON.stringify(Object.keys(msg.message || {}))}`);
+          console.log(`[WHATSAPP] Detected type: ${messageType}`);
           if (messageText) {
             console.log(`[WHATSAPP] Content: ${messageText.substring(0, 50)}${messageText.length > 50 ? '...' : ''}`);
           }
