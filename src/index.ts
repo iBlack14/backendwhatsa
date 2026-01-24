@@ -16,6 +16,7 @@ const PORT = Number(process.env.PORT) || 4000;
 // ✅ CORS restrictivo - Solo permitir frontend autorizado
 const allowedOrigins = [
   process.env.FRONTEND_URL || 'http://localhost:3000',
+  'https://connect.blxkstudio.com', // Producción
   'http://localhost:3000', // Desarrollo
   'http://localhost:3001', // Desarrollo alternativo
 ];
