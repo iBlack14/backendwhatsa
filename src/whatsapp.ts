@@ -512,7 +512,13 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
           }
 
           // 🔐 Detectar si es mensaje "Ver una vez"
-          const isViewOnce = messageType.startsWith('view_once');
+          // IMPORTANTE: WhatsApp reporta isViewOnce en msg.key, incluso si el contenido no se ha descifrado aún
+          const isViewOnce = (msg.key as any).isViewOnce || messageType.startsWith('view_once');
+
+          // Si es view once pero no tenemos tipo (ej. fallo de desencriptación), asumimos imagen por defecto
+          const finalMessageType = (isViewOnce && messageType === 'text' && !messageText)
+            ? 'view_once_image'
+            : messageType;
 
           const savedMessage = {
             instance_id: clientId,
@@ -522,7 +528,7 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
             sender_phone: senderPhone,
             message_text: messageText,
             message_caption: undefined, // Ya incluido en messageText
-            message_type: messageType,
+            message_type: finalMessageType,
             media_url: mediaUrl,
             from_me: fromMe || false,
             timestamp: new Date(msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now()),
