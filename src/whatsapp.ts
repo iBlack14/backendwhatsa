@@ -419,6 +419,14 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
 
         // Persist message to database
         try {
+          // LOG DEBUG PROFUNDO
+          console.log('------------------------------------------------');
+          console.log(`[WHATSAPP] DEBUG MESSAGE STRUCTURE (${fromMe ? 'ME' : 'OTHER'}):`);
+          try {
+            console.log(JSON.stringify(msg, null, 2));
+          } catch (e) { console.log('Error printing msg json'); }
+          console.log('------------------------------------------------');
+
           // Extract complete message text
           const messageText = extractMessageText(msg.message);
           const messageType = detectMessageType(msg.message);
