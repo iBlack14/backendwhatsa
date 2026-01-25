@@ -256,6 +256,15 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
     whatsappLogger.debug({ clientId }, 'No proxy configured');
   }
 
+  // Cache compatible con Baileys
+  const msgRetryCounterCache = {
+    get: (key: string) => { return retryMap.get(key) },
+    set: (key: string, value: any) => { retryMap.set(key, value) },
+    del: (key: string) => { retryMap.delete(key) },
+    flushAll: () => { retryMap.clear() }
+  };
+  const retryMap = new Map<string, any>();
+
   const sock = makeWASocket({
     auth: state,
     browser: ['Chrome (Linux)', '', ''],
@@ -266,6 +275,10 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
     keepAliveIntervalMs: 30000,
     // Agregar proxy si está disponible
     agent,
+    // CRÍTICO: Cache para reintentos de mensajes (View Once / E2E)
+    msgRetryCounterCache,
+    // Habilitar reintentos de peticiones
+    retryRequestDelayMs: 250,
   });
 
   const session: WhatsAppSession = {
