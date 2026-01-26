@@ -248,15 +248,15 @@ async function processAndSaveMessage(clientId: string, sock: WASocket, msg: WAMe
       }
     }
 
-    // Marcar como procesado
-    processedMessages.set(messageId, Date.now());
-
     // ⚠️ FILTRO CRÍTICO: Si no hay mensaje real y no es un mensaje del sistema (stub), ignorar
     // Esto evita guardar burbujas vacías cuando WhatsApp aún no ha descifrado el mensaje
     if (!msg.message && !msg.messageStubType) {
       console.log(`[WHATSAPP] ⏳ Message content not yet available for ${messageId}, skipping until update...`);
       return;
     }
+
+    // ✅ MARCAR COMO PROCESADO SOLO SI TIENE CONTENIDO
+    processedMessages.set(messageId, Date.now());
 
     // LOG DEBUG PROFUNDO
     console.log('------------------------------------------------');
@@ -497,12 +497,15 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
   sock.ev.on('messages.update', async (updates) => {
     for (const update of updates) {
       if (update.update.message) {
-        // Si el update trae contenido de mensaje, lo procesamos como si fuera nuevo (upsert)
-        // La lógica de anti-duplicación o el upsert en la DB manejará el resto
-        const fullMsg = await (sock as any).loadMessage(update.key.remoteJid, update.key.id);
-        if (fullMsg) {
-          await processAndSaveMessage(clientId, sock, fullMsg);
-        }
+        // Reconstruir un objeto WAMessage completo para procesarlo
+        const msgToProcess: any = {
+          key: update.key,
+          message: update.update.message,
+          messageTimestamp: (update as any).messageTimestamp || Math.floor(Date.now() / 1000),
+          pushName: (update as any).pushName
+        };
+
+        await processAndSaveMessage(clientId, sock, msgToProcess);
       }
     }
   });
