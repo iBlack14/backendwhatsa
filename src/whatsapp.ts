@@ -243,39 +243,24 @@ async function processAndSaveMessage(clientId: string, sock: WASocket, msg: WAMe
     if (!fromMe && processedMessages.has(messageId)) {
       const lastProcessed = processedMessages.get(messageId)!;
       const twoMinutesAgo = Date.now() - (2 * 60 * 1000);
-      if (lastProcessed > twoMinutesAgo) {
-        return; // Saltar ya procesado
-      }
+      if (lastProcessed > twoMinutesAgo) return;
     }
 
-    // ⚠️ FILTRO CRÍTICO: Si no hay mensaje real y no es un mensaje del sistema (stub), ignorar
-    // Esto evita guardar burbujas vacías cuando WhatsApp aún no ha descifrado el mensaje
-    if (!msg.message && !msg.messageStubType) {
-      console.log(`[WHATSAPP] ⏳ Message content not yet available for ${messageId}, skipping until update...`);
-      return;
-    }
-
-    // ✅ MARCAR COMO PROCESADO SOLO SI TIENE CONTENIDO
+    // Marcar como procesado (hacemos upsert en DB luego, así que está bien)
     processedMessages.set(messageId, Date.now());
-
-    // LOG DEBUG PROFUNDO
-    console.log('------------------------------------------------');
-    console.log(`[WHATSAPP] DEBUG MESSAGE STRUCTURE (${fromMe ? 'ME' : 'OTHER'}):`);
-    try {
-      console.log(JSON.stringify(msg, null, 2));
-    } catch (e) { console.log('Error printing msg json'); }
-    console.log('------------------------------------------------');
 
     // Extraer texto y tipo
     const messageText = extractMessageText(msg.message);
     let messageType = detectMessageType(msg.message);
 
-    // 🔐 Refinar detección usando la metadata de la llave (KEY)
+    // 🔐 Detectar View Once (Priorizar metadata de la KEY)
     const isViewOnce = (msg.key as any).isViewOnce || messageType.startsWith('view_once');
     if (isViewOnce && !messageType.startsWith('view_once')) {
       messageType = 'view_once_image';
-      console.log(`[WHATSAPP] 🔐 View Once detected from KEY metadata`);
     }
+
+    // Si no hay contenido aún, poner un texto temporal
+    const finalMessageText = messageText || (isViewOnce ? '🔐 Foto/Video (Cargando...)' : undefined);
 
     console.log(`[WHATSAPP] ${fromMe ? 'Outbound' : 'Inbound'} message [${messageType}] from ${remoteJid}`);
 
@@ -325,7 +310,10 @@ async function processAndSaveMessage(clientId: string, sock: WASocket, msg: WAMe
         mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
       }
     } catch (mediaError) {
-      console.error(`[WHATSAPP] Media processing failed for ${messageId}:`, mediaError);
+      // Ignorar error de descarga si el mensaje aún está cifrado (ausente)
+      if (!msg.messageStubType) {
+        console.error(`[WHATSAPP] Media download pending for ${messageId}`);
+      }
     }
 
     // Attempt to retrieve contact profile picture
@@ -336,8 +324,8 @@ async function processAndSaveMessage(clientId: string, sock: WASocket, msg: WAMe
       }
     } catch (picError) { /* ignore */ }
 
-    // Final message type logic for view once
-    const finalMessageType = (isViewOnce && messageType === 'text' && !messageText) ? 'view_once_image' : messageType;
+    // FINAL MESSAGE TYPE LOGIC
+    const finalMessageType = (isViewOnce && messageType === 'text' && !finalMessageText) ? 'view_once_image' : messageType;
 
     const savedMessage = {
       instance_id: clientId,
@@ -345,7 +333,7 @@ async function processAndSaveMessage(clientId: string, sock: WASocket, msg: WAMe
       message_id: messageId,
       sender_name: senderName,
       sender_phone: senderPhone,
-      message_text: messageText,
+      message_text: finalMessageText, // Usamos el texto procesado
       message_type: finalMessageType,
       media_url: mediaUrl,
       from_me: fromMe || false,
@@ -358,7 +346,7 @@ async function processAndSaveMessage(clientId: string, sock: WASocket, msg: WAMe
     };
 
     await messageService.saveMessage(savedMessage);
-    console.log(`[WHATSAPP] Message saved: ${messageId}`);
+    console.log(`[WHATSAPP] Message processed: ${messageId} (${finalMessageType})`);
 
     // Update contact
     if (!fromMe && remoteJid && !remoteJid.includes('@g.us')) {
