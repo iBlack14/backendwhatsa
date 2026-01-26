@@ -45,8 +45,6 @@ async function uploadMediaToSupabase(
   mimeType: string
 ): Promise<string | undefined> {
   try {
-    // const supabase = createClient(supabaseUrl, supabaseKey); // USAR SINGLETON
-
     // Crear path único: instance_id/YYYY-MM/filename
     const date = new Date();
     const yearMonth = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
@@ -210,13 +208,9 @@ function detectMessageType(message: any): string {
 
 /**
  * Helper para obtener el webhook_url de una instancia desde Supabase
- * @param instanceId - ID de la instancia
- * @returns webhook_url o null si no existe
  */
 async function getInstanceWebhookUrl(instanceId: string): Promise<string | null> {
   try {
-    // const supabase = createClient(supabaseUrl, supabaseKey); // USAR SINGLETON
-
     const { data, error } = await supabase
       .from('instances')
       .select('webhook_url')
@@ -234,137 +228,250 @@ async function getInstanceWebhookUrl(instanceId: string): Promise<string | null>
   }
 }
 
+/**
+ * Función central para procesar y guardar un mensaje
+ */
+async function processAndSaveMessage(clientId: string, sock: WASocket, msg: WAMessage): Promise<void> {
+  try {
+    const fromMe = msg.key.fromMe;
+    const remoteJid = msg.key.remoteJid;
+    const messageId = msg.key.id;
+
+    if (!remoteJid || !messageId) return;
+
+    // 🛡️ ANTI-DUPLICACIÓN (Solo para mensajes entrantes)
+    if (!fromMe && processedMessages.has(messageId)) {
+      const lastProcessed = processedMessages.get(messageId)!;
+      const twoMinutesAgo = Date.now() - (2 * 60 * 1000);
+      if (lastProcessed > twoMinutesAgo) {
+        return; // Saltar ya procesado
+      }
+    }
+
+    // Marcar como procesado
+    processedMessages.set(messageId, Date.now());
+
+    // ⚠️ FILTRO CRÍTICO: Si no hay mensaje real y no es un mensaje del sistema (stub), ignorar
+    // Esto evita guardar burbujas vacías cuando WhatsApp aún no ha descifrado el mensaje
+    if (!msg.message && !msg.messageStubType) {
+      console.log(`[WHATSAPP] ⏳ Message content not yet available for ${messageId}, skipping until update...`);
+      return;
+    }
+
+    // LOG DEBUG PROFUNDO
+    console.log('------------------------------------------------');
+    console.log(`[WHATSAPP] DEBUG MESSAGE STRUCTURE (${fromMe ? 'ME' : 'OTHER'}):`);
+    try {
+      console.log(JSON.stringify(msg, null, 2));
+    } catch (e) { console.log('Error printing msg json'); }
+    console.log('------------------------------------------------');
+
+    // Extraer texto y tipo
+    const messageText = extractMessageText(msg.message);
+    let messageType = detectMessageType(msg.message);
+
+    // 🔐 Refinar detección usando la metadata de la llave (KEY)
+    const isViewOnce = (msg.key as any).isViewOnce || messageType.startsWith('view_once');
+    if (isViewOnce && !messageType.startsWith('view_once')) {
+      messageType = 'view_once_image';
+      console.log(`[WHATSAPP] 🔐 View Once detected from KEY metadata`);
+    }
+
+    console.log(`[WHATSAPP] ${fromMe ? 'Outbound' : 'Inbound'} message [${messageType}] from ${remoteJid}`);
+
+    // Extraer nombre del contacto
+    const senderName = msg.pushName || undefined;
+    const senderPhone = remoteJid?.split('@')[0] || undefined;
+
+    // Extraer información adicional según el tipo
+    let mediaUrl = undefined;
+    let fileName = undefined;
+    let mimeType = undefined;
+
+    // Obtener el contenido real desempaquetado de forma recursiva
+    const content = getRealMessage(msg.message);
+
+    // Descargar media si existe
+    try {
+      if ((messageType === 'image' || messageType === 'view_once_image') && content?.imageMessage) {
+        fileName = (content.imageMessage as any).fileName || `image_${Date.now()}.jpg`;
+        mimeType = content.imageMessage.mimetype || 'image/jpeg';
+        const buffer = await downloadMediaMessage(msg, 'buffer', {});
+        mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+      } else if ((messageType === 'video' || messageType === 'view_once_video') && content?.videoMessage) {
+        fileName = (content.videoMessage as any).fileName || `video_${Date.now()}.mp4`;
+        mimeType = content.videoMessage.mimetype || 'video/mp4';
+        const buffer = await downloadMediaMessage(msg, 'buffer', {});
+        mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+      } else if (messageType === 'audio' && content?.audioMessage) {
+        fileName = `audio_${Date.now()}.mp3`;
+        mimeType = 'audio/mpeg';
+        const buffer = await downloadMediaMessage(msg, 'buffer', {});
+        mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+      } else if (messageType === 'voice' && content?.audioMessage) {
+        fileName = `voice_${Date.now()}.ogg`;
+        mimeType = 'audio/ogg';
+        const buffer = await downloadMediaMessage(msg, 'buffer', {});
+        mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+      } else if (messageType === 'document' && content?.documentMessage) {
+        fileName = content.documentMessage.fileName || `document_${Date.now()}`;
+        mimeType = content.documentMessage.mimetype || 'application/octet-stream';
+        const buffer = await downloadMediaMessage(msg, 'buffer', {});
+        mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+      } else if (messageType === 'sticker' && content?.stickerMessage) {
+        fileName = `sticker_${Date.now()}.webp`;
+        mimeType = content.stickerMessage.mimetype || 'image/webp';
+        const buffer = await downloadMediaMessage(msg, 'buffer', {});
+        mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
+      }
+    } catch (mediaError) {
+      console.error(`[WHATSAPP] Media processing failed for ${messageId}:`, mediaError);
+    }
+
+    // Attempt to retrieve contact profile picture
+    let profilePicUrl: string | undefined = undefined;
+    try {
+      if (remoteJid && !fromMe) {
+        profilePicUrl = await sock.profilePictureUrl(remoteJid, 'image');
+      }
+    } catch (picError) { /* ignore */ }
+
+    // Final message type logic for view once
+    const finalMessageType = (isViewOnce && messageType === 'text' && !messageText) ? 'view_once_image' : messageType;
+
+    const savedMessage = {
+      instance_id: clientId,
+      chat_id: remoteJid || '',
+      message_id: messageId,
+      sender_name: senderName,
+      sender_phone: senderPhone,
+      message_text: messageText,
+      message_type: finalMessageType,
+      media_url: mediaUrl,
+      from_me: fromMe || false,
+      timestamp: new Date(msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now()),
+      is_read: fromMe || false,
+      metadata: { ...msg, fileName },
+      profile_pic_url: profilePicUrl,
+      is_view_once: isViewOnce,
+      view_once_opened_times: [],
+    };
+
+    await messageService.saveMessage(savedMessage);
+    console.log(`[WHATSAPP] Message saved: ${messageId}`);
+
+    // Update contact
+    if (!fromMe && remoteJid && !remoteJid.includes('@g.us')) {
+      try {
+        await contactService.saveContact({
+          instance_id: clientId,
+          jid: remoteJid,
+          name: senderName,
+          push_name: senderName,
+          profile_pic_url: profilePicUrl,
+          is_blocked: false,
+        });
+      } catch (e) { }
+    }
+
+    // WebSocket notify
+    wsService.emitNewMessage(clientId, {
+      ...savedMessage,
+      instanceId: clientId,
+      chatId: remoteJid,
+      sender: senderName || senderPhone,
+      text: messageText,
+      type: finalMessageType,
+      hasMedia: !!mediaUrl,
+      mediaUrl: mediaUrl,
+    });
+
+    // Webhook notify
+    try {
+      let webhookUrl = await getInstanceWebhookUrl(clientId);
+      if (!webhookUrl && process.env.FRONTEND_URL) {
+        webhookUrl = `${process.env.FRONTEND_URL}/api/webhooks/whatsapp`;
+      }
+
+      if (webhookUrl) {
+        axios.post(webhookUrl, {
+          event: 'messages.upsert',
+          instanceId: clientId,
+          data: {
+            fromMe,
+            key: msg.key,
+            message: msg.message,
+            messageTimestamp: msg.messageTimestamp,
+          }
+        }, { timeout: 5000 }).catch(() => { });
+      }
+    } catch (e) { }
+
+  } catch (error) {
+    console.error(`[${clientId}] ❌ Error in processAndSaveMessage:`, error);
+  }
+}
+
 export async function createWhatsAppSession(clientId: string): Promise<void> {
-  if (sessions.has(clientId)) {
-    whatsappLogger.debug({ clientId }, 'Session already active');
-    return;
-  }
+  if (sessions.has(clientId)) return;
 
-  whatsappLogger.info({ clientId }, 'Initializing session');
-
-  // Usar autenticación basada en Supabase
   const { state, saveCreds } = await useSupabaseAuthState(clientId);
-
-  // Obtener proxy si está configurado
   const proxy = await proxyService.getProxyForInstance(clientId);
-  let agent = undefined;
+  let agent = proxy ? proxyService.createProxyAgent(proxy) : undefined;
 
-  if (proxy) {
-    whatsappLogger.info({ clientId, proxy: proxy.name }, 'Using proxy configuration');
-    agent = proxyService.createProxyAgent(proxy);
-  } else {
-    whatsappLogger.debug({ clientId }, 'No proxy configured');
-  }
-
-  // Cache compatible con Baileys
-  const msgRetryCounterCache = {
-    get: (key: string) => { return retryMap.get(key) },
-    set: (key: string, value: any) => { retryMap.set(key, value) },
-    del: (key: string) => { retryMap.delete(key) },
-    flushAll: () => { retryMap.clear() }
-  };
   const retryMap = new Map<string, any>();
+  const msgRetryCounterCache: any = {
+    get: (key: string) => retryMap.get(key),
+    set: (key: string, value: any) => { retryMap.set(key, value) },
+    del: (key: string) => retryMap.delete(key),
+    flushAll: () => retryMap.clear()
+  };
 
   const sock = makeWASocket({
     auth: state,
     browser: ['Chrome (Linux)', '', ''],
-    logger: whatsappLogger.child({ clientId }, { level: 'fatal' }), // Silenciar logs de Baileys
-    // Configuración adicional para mejorar conexión
+    logger: whatsappLogger.child({ clientId }, { level: 'fatal' }),
     connectTimeoutMs: 60000,
     defaultQueryTimeoutMs: 60000,
     keepAliveIntervalMs: 30000,
-    // Agregar proxy si está disponible
     agent,
-    // CRÍTICO: Cache para reintentos de mensajes (View Once / E2E)
     msgRetryCounterCache,
-    // Habilitar reintentos de peticiones
     retryRequestDelayMs: 250,
   });
 
-  const session: WhatsAppSession = {
-    clientId,
-    sock,
-    qr: null,
-    state: 'Initializing',
-  };
-
+  const session: WhatsAppSession = { clientId, sock, qr: null, state: 'Initializing' };
   sessions.set(clientId, session);
 
-  // Evento: QR generado
+  sock.ev.on('creds.update', saveCreds);
+
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
-
     if (qr) {
-      whatsappLogger.info({ clientId }, '📱 QR CODE GENERATED');
-
-      // Generate terminal QR for debugging
-      try {
-        const qrTerminal = require('qrcode-terminal');
-        qrTerminal.generate(qr, { small: true });
-      } catch (e) {
-        // Silently fail
-      }
-
-      // Convert QR to base64 for frontend
       const qrBase64 = await QRCode.toDataURL(qr);
       session.qr = qrBase64;
-      session.state = 'Initializing';
-
-      await updateInstanceInN8N(clientId, {
-        state: 'Initializing',
-        qr: qrBase64,
-        qr_loading: false,
-      });
-      whatsappLogger.info({ clientId }, 'QR code saved to database');
+      await updateInstanceInN8N(clientId, { state: 'Initializing', qr: qrBase64, qr_loading: false });
     }
 
     if (connection === 'close') {
-      const shouldReconnect =
-        (lastDisconnect?.error as Boom)?.output?.statusCode !==
-        DisconnectReason.loggedOut;
-
-      whatsappLogger.info({ clientId, shouldReconnect }, '🔴 Connection terminated');
-
+      const shouldReconnect = (lastDisconnect?.error as Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
       if (shouldReconnect) {
-        session.state = 'Disconnected';
         sessions.delete(clientId);
-        whatsappLogger.info({ clientId }, 'Initiating automatic reconnection');
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        await createWhatsAppSession(clientId);
+        setTimeout(() => createWhatsAppSession(clientId), 2000);
       } else {
-        session.state = 'Disconnected';
         sessions.delete(clientId);
-        await updateInstanceInN8N(clientId, {
-          state: 'Disconnected',
-          qr: null,
-          qr_loading: false,
-        });
+        await updateInstanceInN8N(clientId, { state: 'Disconnected', qr: null, qr_loading: false });
       }
     } else if (connection === 'open') {
-      console.log(`[WHATSAPP] Connection established for ${clientId}`);
       session.state = 'Connected';
       session.qr = null;
-
-      // Retrieve user information
       const user = sock.user;
       if (user) {
         session.phoneNumber = user.id.split(':')[0];
         session.profileName = user.name || '';
-        console.log(`[WHATSAPP] Account: ${session.phoneNumber}`);
-        console.log(`[WHATSAPP] Display name: ${session.profileName}`);
-
-        // Attempt to retrieve profile picture
         try {
-          const jid = user.id;
-          const profilePicUrl = await sock.profilePictureUrl(jid, 'image');
-          session.profilePicUrl = profilePicUrl;
-          console.log(`[WHATSAPP] Profile image: ${profilePicUrl ? 'Retrieved' : 'Not available'}`);
-        } catch (error) {
-          console.log(`[WHATSAPP] Profile image retrieval failed`);
-          session.profilePicUrl = undefined;
-        }
+          session.profilePicUrl = await sock.profilePictureUrl(user.id, 'image');
+        } catch (e) { }
       }
-
       await updateInstanceInN8N(clientId, {
         state: 'Connected',
         qr: null,
@@ -373,469 +480,81 @@ export async function createWhatsAppSession(clientId: string): Promise<void> {
         profile_name: session.profileName,
         profile_pic_url: session.profilePicUrl,
       });
-
-      // 🔌 Emitir evento WebSocket de conexión exitosa
       wsService.emitInstanceStateChange(clientId, 'Connected');
     }
   });
 
-  // Guardar credenciales
-  sock.ev.on('creds.update', saveCreds);
+  sock.ev.on('contacts.upsert', async (contacts) => syncContacts(clientId, contacts));
 
-  // ✅ Sincronización de Contactos
-  sock.ev.on('contacts.upsert', async (contacts) => {
-    try {
-      await syncContacts(clientId, contacts);
-    } catch (error) {
-      console.error(`[${clientId}] ❌ Error handling contacts.upsert:`, error);
-    }
-  });
-
-  sock.ev.on('contacts.update', async (updates) => {
-    // Para updates parciales, podríamos necesitar lógica más compleja,
-    // pero por ahora intentamos sincronizar lo que llegue si tiene ID
-    try {
-      const contacts = updates.map(u => ({ ...u, id: u.id }));
-      await syncContacts(clientId, contacts as any);
-    } catch (error) {
-      console.error(`[${clientId}] ❌ Error handling contacts.update:`, error);
-    }
-  });
-
-  // Message processing and webhook notifications
-  sock.ev.on('messages.upsert', async ({ messages, type }) => {
-    console.log(`[WHATSAPP] Processing ${messages.length} message(s) for ${clientId}`);
-
+  // 📥 Manejar nuevos mensajes
+  sock.ev.on('messages.upsert', async ({ messages }) => {
     for (const msg of messages) {
-      try {
-        const fromMe = msg.key.fromMe;
-        const remoteJid = msg.key.remoteJid;
-        const messageId = msg.key.id;
-
-        // 🛡️ ANTI-DUPLICACIÓN: Verificar si este mensaje ya fue procesado recientemente
-        if (messageId && processedMessages.has(messageId)) {
-          const lastProcessed = processedMessages.get(messageId)!;
-          const twoMinutesAgo = Date.now() - (2 * 60 * 1000);
-
-          if (lastProcessed > twoMinutesAgo) {
-            // console.log(`[WHATSAPP] ⏭️ Skipping duplicate message: ${messageId}`);
-            continue; // Saltar este mensaje, ya fue procesado
-          }
-        }
-
-        // Marcar mensaje como procesado
-        if (messageId) {
-          processedMessages.set(messageId, Date.now());
-        }
-
-        console.log(`[WHATSAPP] ${fromMe ? 'Outbound' : 'Inbound'} message from ${remoteJid}`);
-
-        // LOG DEBUG PROFUNDO
-        console.log('------------------------------------------------');
-        console.log(`[WHATSAPP] DEBUG MESSAGE STRUCTURE (${fromMe ? 'ME' : 'OTHER'}):`);
-        try {
-          console.log(JSON.stringify(msg, null, 2));
-        } catch (e) { console.log('Error printing msg json'); }
-        console.log('------------------------------------------------');
-
-        // ⚠️ FILTRO CRÍTICO: Si no hay mensaje real y no es un mensaje del sistema (stub), ignorar
-        // Esto evita guardar burbujas vacías cuando WhatsApp aún no ha descifrado el mensaje
-        if (!msg.message && !msg.messageStubType) {
-          console.log(`[WHATSAPP] ⏳ Message content not yet available for ${messageId}, skipping until update...`);
-          continue;
-        }
-
-        console.log(`[WHATSAPP] 🔐 VIEW ONCE MESSAGE DETECTED - This message can only be viewed once!`);
-      }
-        if (messageText) {
-        console.log(`[WHATSAPP] Content: ${messageText.substring(0, 50)}${messageText.length > 50 ? '...' : ''}`);
-      }
-
-      // Extraer nombre del contacto
-      const senderName = msg.pushName || undefined;
-      const senderPhone = remoteJid?.split('@')[0] || undefined;
-
-      // Extraer información adicional según el tipo
-      let mediaUrl = undefined;
-      let fileName = undefined;
-      let mimeType = undefined;
-
-      // Obtener el contenido real desempaquetado de forma recursiva
-      const content = getRealMessage(msg.message);
-
-      // Descargar media si existe
-      try {
-        if ((messageType === 'image' || messageType === 'view_once_image') && content?.imageMessage) {
-          fileName = (content.imageMessage as any).fileName || `image_${Date.now()}.jpg`;
-          mimeType = content.imageMessage.mimetype || 'image/jpeg';
-          const buffer = await downloadMediaMessage(msg, 'buffer', {});
-          mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
-        } else if ((messageType === 'video' || messageType === 'view_once_video') && content?.videoMessage) {
-          fileName = (content.videoMessage as any).fileName || `video_${Date.now()}.mp4`;
-          mimeType = content.videoMessage.mimetype || 'video/mp4';
-          const buffer = await downloadMediaMessage(msg, 'buffer', {});
-          mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
-        } else if (messageType === 'audio' && content?.audioMessage) {
-          console.log(`[WHATSAPP] Processing standard audio message...`);
-          fileName = `audio_${Date.now()}.mp3`;
-          mimeType = 'audio/mpeg';
-          const buffer = await downloadMediaMessage(msg, 'buffer', {});
-          mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
-        } else if (messageType === 'voice' && content?.audioMessage) {
-          console.log(`[WHATSAPP] Processing voice note (PTT)...`);
-          fileName = `voice_${Date.now()}.ogg`;
-          mimeType = 'audio/ogg';
-          const buffer = await downloadMediaMessage(msg, 'buffer', {});
-          mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
-        } else if (messageType === 'document' && content?.documentMessage) {
-          fileName = content.documentMessage.fileName || `document_${Date.now()}`;
-          mimeType = content.documentMessage.mimetype || 'application/octet-stream';
-          const buffer = await downloadMediaMessage(msg, 'buffer', {});
-          mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
-        } else if (messageType === 'sticker' && content?.stickerMessage) {
-          fileName = `sticker_${Date.now()}.webp`;
-          mimeType = content.stickerMessage.mimetype || 'image/webp';
-          const buffer = await downloadMediaMessage(msg, 'buffer', {});
-          mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
-        }
-
-        if (mediaUrl) {
-          console.log(`[WHATSAPP] Media file uploaded: ${mediaUrl}`);
-        }
-      } catch (mediaError) {
-        console.error(`[WHATSAPP] Media processing failed:`, mediaError);
-      }
-
-      // Attempt to retrieve contact profile picture
-      let profilePicUrl: string | undefined = undefined;
-      try {
-        if (remoteJid && !fromMe) {
-          // For individual chats, use sender JID
-          // For groups, use group JID
-          const picJid = remoteJid;
-          profilePicUrl = await sock.profilePictureUrl(picJid, 'image');
-          console.log(`[WHATSAPP] Contact profile image retrieved for ${picJid}`);
-        }
-      } catch (picError) {
-        // Profile picture not available or retrieval failed
-        console.log(`[WHATSAPP] Contact profile image not available for ${remoteJid}`);
-      }
-
-      // 🔐 Detectar si es mensaje "Ver una vez"
-      // IMPORTANTE: WhatsApp reporta isViewOnce en msg.key, incluso si el contenido no se ha descifrado aún
-      const isViewOnce = (msg.key as any).isViewOnce || messageType.startsWith('view_once');
-
-      // Si es view once pero no tenemos tipo (ej. fallo de desencriptación), asumimos imagen por defecto
-      const finalMessageType = (isViewOnce && messageType === 'text' && !messageText)
-        ? 'view_once_image'
-        : messageType;
-
-      const savedMessage = {
-        instance_id: clientId,
-        chat_id: remoteJid || '',
-        message_id: messageId || '',
-        sender_name: senderName,
-        sender_phone: senderPhone,
-        message_text: messageText,
-        message_caption: undefined, // Ya incluido en messageText
-        message_type: finalMessageType,
-        media_url: mediaUrl,
-        from_me: fromMe || false,
-        timestamp: new Date(msg.messageTimestamp ? Number(msg.messageTimestamp) * 1000 : Date.now()),
-        is_read: fromMe || false,
-        metadata: { ...msg, fileName },
-        profile_pic_url: profilePicUrl,
-        is_view_once: isViewOnce,  // 🔐 Marcar como "ver una vez"
-        view_once_opened_times: [],  // Array vacío - se llenará cuando se abra
-      };
-
-      await messageService.saveMessage(savedMessage);
-
-      console.log(`[WHATSAPP] Message persisted to database`);
-
-      // Automatically save/update contact information
-      if (!fromMe && remoteJid && !remoteJid.includes('@g.us')) {
-        try {
-          await contactService.saveContact({
-            instance_id: clientId,
-            jid: remoteJid,
-            name: senderName,
-            push_name: senderName,
-            profile_pic_url: profilePicUrl,
-            is_blocked: false,
-          });
-          console.log(`[WHATSAPP] Contact information updated: ${remoteJid}`);
-        } catch (contactError) {
-          console.error(`[WHATSAPP] Contact update failed:`, contactError);
-        }
-      }
-
-      // Emit WebSocket event for real-time updates
-      try {
-        wsService.emitNewMessage(clientId, {
-          ...savedMessage,
-          instanceId: clientId,
-          chatId: remoteJid,
-          sender: senderName || senderPhone,
-          text: messageText,
-          type: messageType,
-          hasMedia: !!mediaUrl,
-          mediaUrl: mediaUrl,
-        });
-        console.log(`[${clientId}] 🔌 WebSocket event emitted`);
-      } catch (wsError) {
-        console.error(`[${clientId}] ⚠️ Error emitting WebSocket event:`, wsError);
-      }
-    } catch (dbError) {
-      console.error(`[${clientId}] ❌ Error saving message to DB:`, dbError);
+      await processAndSaveMessage(clientId, sock, msg);
     }
+  });
 
-    // 🔀 LÓGICA DE WEBHOOK: Priorizar webhook_url personalizado (N8N) o usar FRONTEND_URL (Templates)
-    let webhookUrl: string | null = null;
-    let webhookMode = 'unknown';
-
-    // 1️⃣ Intentar obtener webhook_url personalizado de la instancia (modo N8N)
-    const customWebhook = await getInstanceWebhookUrl(clientId);
-
-    if (customWebhook) {
-      webhookUrl = customWebhook;
-      webhookMode = 'N8N (custom)';
-      console.log(`[${clientId}] 🎯 Using custom webhook (N8N): ${webhookUrl}`);
-    } else {
-      // 2️⃣ Fallback: usar FRONTEND_URL (modo Templates)
-      const frontendUrl = process.env.FRONTEND_URL;
-
-      if (frontendUrl) {
-        webhookUrl = `${frontendUrl}/api/webhooks/whatsapp`;
-        webhookMode = 'Templates (internal)';
-        console.log(`[WHATSAPP] Using internal webhook endpoint: ${webhookUrl}`);
-      } else {
-        console.warn(`[${clientId}] ⚠️ No webhook configured (neither custom nor FRONTEND_URL), skipping`);
-        continue;
+  // 🔄 Manejar actualizaciones de mensajes (IMPORTANTE para desencriptación diferida)
+  sock.ev.on('messages.update', async (updates) => {
+    for (const update of updates) {
+      if (update.update.message) {
+        // Si el update trae contenido de mensaje, lo procesamos como si fuera nuevo (upsert)
+        // La lógica de anti-duplicación o el upsert en la DB manejará el resto
+        const fullMsg = await (sock as any).loadMessage(update.key.remoteJid, update.key.id);
+        if (fullMsg) {
+          await processAndSaveMessage(clientId, sock, fullMsg);
+        }
       }
     }
-
-    // Enviar webhook
-    await axios.post(webhookUrl, {
-      event: 'messages.upsert',
-      instanceId: clientId,
-      data: {
-        fromMe: fromMe,
-        key: {
-          remoteJid: remoteJid,
-          fromMe: fromMe,
-          id: messageId,
-        },
-        message: msg.message,
-        messageTimestamp: msg.messageTimestamp,
-      }
-    }, {
-      timeout: 5000,
-      headers: {
-        'Content-Type': 'application/json',
-      }
-    });
-
-    console.log(`[WHATSAPP] Webhook notification sent (${webhookMode}): ${fromMe ? 'outbound' : 'inbound'}`);
-  } catch (webhookError: any) {
-    console.error(`[${clientId}] ❌ Error sending webhook:`, webhookError.message);
-    // No bloquear el flujo si falla el webhook
-  }
-}
   });
 }
 
-export async function sendMessage(
-  clientId: string,
-  to: string,
-  message: string
-): Promise<void> {
+export async function sendMessage(clientId: string, to: string, message: string): Promise<void> {
   const session = sessions.get(clientId);
-
-  if (!session) {
-    throw new Error(`Session not found for clientId: ${clientId}`);
-  }
-
-  if (session.state !== 'Connected') {
-    throw new Error(`Session not connected. Current state: ${session.state}`);
-  }
-
-  if (!session.sock || typeof session.sock.sendMessage !== 'function') {
-    throw new Error('WhatsApp socket is not properly initialized. Please reconnect the session.');
-  }
-
+  if (!session || session.state !== 'Connected') throw new Error('Session not connected');
   const jid = to.includes('@s.whatsapp.net') ? to : `${to}@s.whatsapp.net`;
-
-  console.log(`📤 Sending message to ${to} from ${clientId}`);
-
-  try {
-    await session.sock.sendMessage(jid, { text: message });
-    console.log(`✅ Message sent successfully`);
-  } catch (error: any) {
-    console.error(`❌ Error sending message:`, error);
-    throw new Error(`Failed to send message: ${error.message}`);
-  }
+  await session.sock.sendMessage(jid, { text: message });
 }
 
-export function getSession(clientId: string): WhatsAppSession | undefined {
-  return sessions.get(clientId);
-}
-
-export function getAllSessions(): WhatsAppSession[] {
-  return Array.from(sessions.values());
-}
+export function getSession(clientId: string) { return sessions.get(clientId); }
+export function getAllSessions() { return Array.from(sessions.values()); }
 
 export async function disconnectSession(clientId: string): Promise<void> {
   const session = sessions.get(clientId);
-
   if (session) {
-    console.log(`🔌 Disconnecting session ${clientId}...`);
     await session.sock.logout();
     sessions.delete(clientId);
-    console.log(`✅ Session ${clientId} disconnected`);
   }
 }
 
 async function updateInstanceInN8N(clientId: string, data: any): Promise<void> {
-  console.log(`\n🔄 Updating instance ${clientId} with data:`, JSON.stringify(data, null, 2));
-
   try {
-    // PRIORIDAD 1: Actualizar directamente en Supabase (más confiable)
-    // const supabaseUrl = process.env.SUPABASE_URL;
-    // const supabaseKey = process.env.SUPABASE_SERVICE_KEY || process.env.SERVICE_ROLE_KEY;
-
-    // console.log(`📌 Supabase URL: ${supabaseUrl ? 'Configured ✅' : 'Not configured ❌'}`);
-    // console.log(`📌 Supabase Key: ${supabaseKey ? 'Configured ✅' : 'Not configured ❌'}`);
-
-    // if (supabaseUrl && supabaseKey) {
-    // const updateUrl = `${supabaseUrl}/rest/v1/instances?document_id=eq.${clientId}`;
-
-    const { error } = await supabase
-      .from('instances')
-      .update(data)
-      .eq('document_id', clientId);
-
-    if (error) {
-      console.error(`❌ Error updating instance in Supabase:`, error.message);
-    } else {
-      console.log(`✅ Updated instance ${clientId} in Supabase`);
-    }
-
-    // PRIORIDAD 2: Intentar N8N como opcional (no crítico)
-    const webhookUrl = process.env.N8N_UPDATE_WEBHOOK;
-    if (webhookUrl) {
-      try {
-        await axios.put(webhookUrl, {
-          documentId: clientId,
-          ...data,
-        }, { timeout: 3000 }); // Timeout de 3s
-        console.log(`✅ Also updated via N8N`);
-      } catch (n8nError: any) {
-        console.log(`ℹ️ N8N update skipped (not critical): ${n8nError.message}`);
-      }
-    }
-    // } else {
-    //   console.error('❌ Supabase credentials not configured - QR will NOT be saved to database!');
-    //   console.error('❌ Set SUPABASE_URL and SUPABASE_SERVICE_KEY environment variables');
-    // }
-  } catch (error: any) {
-    console.error('❌ Error updating instance:', error.message);
-    if (error.response) {
-      console.error('❌ Response status:', error.response.status);
-      console.error('❌ Response data:', error.response.data);
-    }
-  }
+    await supabase.from('instances').update(data).eq('document_id', clientId);
+  } catch (e) { }
 }
 
-// Función para restaurar todas las sesiones existentes al iniciar el servidor
 export async function restoreAllSessions(): Promise<void> {
-  console.log('🔄 Restoring existing sessions from Supabase...');
-
-  // const supabase = createClient(supabaseUrl, supabaseKey); // USAR SINGLETON
-
   try {
-    // Buscar todas las sesiones que tienen credenciales guardadas
-    // Asumimos que si existe la key 'creds', la sesión es válida
-    const { data, error } = await supabase
-      .from('whatsapp_sessions')
-      .select('session_id')
-      .eq('key', 'creds');
-
-    if (error) {
-      console.error('❌ Error fetching sessions from Supabase:', error);
-      // Check if it's a connection error (e.g. invalid URL or network issue)
-      if (error.message && (error.message.includes('fetch failed') || error.message.includes('ENOTFOUND'))) {
-        console.error('⚠️  HINT: Check your SUPABASE_URL and network connectivity.');
-        const supabaseUrl = process.env.SUPABASE_URL;
-        console.error(`⚠️  Current SUPABASE_URL: ${supabaseUrl ? supabaseUrl.replace(/:[^:]*@/, ':****@') : 'NOT SET'}`);
-      }
-      return;
-    }
-
-    if (!data || data.length === 0) {
-      console.log('ℹ️ No existing sessions found in database');
-      return;
-    }
-
-    // Eliminar duplicados por si acaso (aunque key='creds' debería ser único por session_id)
+    const { data } = await supabase.from('whatsapp_sessions').select('session_id').eq('key', 'creds');
+    if (!data) return;
     const sessionIds = [...new Set(data.map(row => row.session_id))];
-
-    console.log(`[WHATSAPP] Discovered ${sessionIds.length} session(s) in database`);
-
-    // Restore each session
     for (const clientId of sessionIds) {
-      try {
-        console.log(`[WHATSAPP] Restoring session: ${clientId}`);
-        await createWhatsAppSession(clientId);
-        // Brief pause between connections
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      } catch (error: any) {
-        console.error(`[WHATSAPP] Session restoration failed for ${clientId}:`, error.message);
-      }
+      createWhatsAppSession(clientId);
+      await new Promise(r => setTimeout(r, 2000));
     }
-
-    console.log(`[WHATSAPP] Session restoration completed. Active sessions: ${sessions.size}`);
-  } catch (error: any) {
-    console.error('❌ Error in restoreAllSessions:', error.message);
-  }
+  } catch (e) { }
 }
 
-/**
- * Sincronizar contactos con Supabase
- */
 async function syncContacts(instanceId: string, contacts: any[]): Promise<void> {
-  if (!contacts || contacts.length === 0) return;
-
-  console.log(`[${instanceId}] 👥 Syncing ${contacts.length} contacts...`);
-
-  // const supabase = createClient(supabaseUrl, supabaseKey); // USAR SINGLETON
-
-  // Preparar datos para upsert
+  if (!contacts?.length) return;
   const contactsData = contacts.map(c => ({
     instance_id: instanceId,
     jid: c.id,
     name: c.name || c.notify || c.verifiedName,
     push_name: c.notify,
-    profile_pic_url: c.imgUrl, // Baileys a veces trae esto
+    profile_pic_url: c.imgUrl,
     updated_at: new Date()
   }));
-
-  // Procesar en lotes de 50 para no saturar
-  const batchSize = 50;
-  for (let i = 0; i < contactsData.length; i += batchSize) {
-    const batch = contactsData.slice(i, i + batchSize);
-
-    const { error } = await supabase
-      .from('contacts')
-      .upsert(batch, {
-        onConflict: 'instance_id,jid',
-        ignoreDuplicates: false
-      });
-
-    if (error) {
-      console.error(`[${instanceId}] ❌ Error syncing contacts batch ${i}:`, error.message);
-    }
+  for (let i = 0; i < contactsData.length; i += 50) {
+    await supabase.from('contacts').upsert(contactsData.slice(i, i + 50), { onConflict: 'instance_id,jid' });
   }
-
-  console.log(`[${instanceId}] ✅ Contacts synced successfully`);
 }
