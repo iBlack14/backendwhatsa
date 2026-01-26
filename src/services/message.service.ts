@@ -35,6 +35,7 @@ export interface Chat {
   unread_count: number;
   is_archived: boolean;
   is_pinned: boolean;
+  last_message_type?: string;
 }
 
 /**
@@ -169,6 +170,7 @@ export class MessageService {
         unread_count: newUnreadCount,
         chat_name: finalChatName,
         profile_pic_url: message.profile_pic_url || currentChat?.profile_pic_url,
+        last_message_type: message.message_type,
       };
 
       await supabase
