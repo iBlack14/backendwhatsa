@@ -8,7 +8,7 @@ import {
 } from './whatsapp';
 import { CreateSessionRequest, SendMessageRequest } from './types';
 import dockerService from './services/docker.service';
-import easypanelService from './services/easypanel.service';
+
 import { createClient } from '@supabase/supabase-js';
 import plansRouter from './routes/plans.routes';
 import proxiesRouter from './routes/proxies.routes';
@@ -347,8 +347,6 @@ router.post('/api/send-image/:clientId', validateApiKey, async (req: Request, re
   }
 });
 
-// ========== RUTAS DE EASYPANEL / N8N ==========
-
 /**
  * Crear nueva instancia de n8n
  * 🔐 Requiere API Key y plan de pago (NO disponible para plan free)
@@ -481,47 +479,23 @@ router.post('/api/suite/create-n8n', async (req: Request, res: Response) => {
       }
     }
 
-    // Decidir si usar Easypanel API o Docker directo
-    const useEasypanelAPI = process.env.USE_EASYPANEL_API === 'true';
-    let result;
+    console.log('[Suite] Using Docker direct to create instance');
 
-    if (useEasypanelAPI) {
-      console.log('[Suite] Using Easypanel API to create instance');
-
-      // Verificar si el servicio ya existe en Easypanel
-      const exists = await easypanelService.serviceExists(service_name);
-      if (exists) {
-        return res.status(400).json({
-          error: 'A service with this name already exists in Easypanel'
-        });
-      }
-
-      // Crear instancia con Easypanel API
-      result = await easypanelService.createN8nInstance({
-        serviceName: service_name,
-        userId: user_id,
-        memory: memory || '256M',
-        cpu: cpu || 256,
-      });
-    } else {
-      console.log('[Suite] Using Docker direct to create instance');
-
-      // Verificar si el contenedor ya existe en Docker
-      const exists = await dockerService.containerExists(service_name);
-      if (exists) {
-        return res.status(400).json({
-          error: 'A Docker container with this name already exists'
-        });
-      }
-
-      // Crear instancia con Docker
-      result = await dockerService.createN8nInstance({
-        serviceName: service_name,
-        userId: user_id,
-        memory: memory || '256M',
-        cpu: cpu || 256,
+    // Verificar si el contenedor ya existe en Docker
+    const exists = await dockerService.containerExists(service_name);
+    if (exists) {
+      return res.status(400).json({
+        error: 'A Docker container with this name already exists'
       });
     }
+
+    // Crear instancia con Docker
+    const result = await dockerService.createN8nInstance({
+      serviceName: service_name,
+      userId: user_id,
+      memory: memory || '256M',
+      cpu: cpu || 256,
+    });
 
     // Guardar en Supabase
     const { data: suiteData, error: supabaseError } = await supabase
