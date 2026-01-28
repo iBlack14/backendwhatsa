@@ -9,7 +9,8 @@ RUN apk add --no-cache python3 make g++ docker-cli
 COPY package*.json ./
 
 # Instalar TODAS las dependencias (incluyendo devDependencies para compilar)
-RUN npm install
+# Instalar TODAS las dependencias (forzando devDependencies aunque estemos en modo production)
+RUN npm install --production=false
 
 # Copiar código fuente
 COPY . .
