@@ -36,7 +36,28 @@ setInterval(() => {
 }, 5 * 60 * 1000); // Cada 5 minutos
 
 /**
- * Subir archivo de media a Supabase Storage
+ * Guardar archivo localmente (Fallback)
+ */
+async function saveMediaLocally(
+  buffer: Buffer,
+  fileName: string
+): Promise<string> {
+  const mediaDir = path.join(process.cwd(), 'media');
+  if (!fs.existsSync(mediaDir)) {
+    fs.mkdirSync(mediaDir, { recursive: true });
+  }
+
+  const filePath = path.join(mediaDir, fileName);
+  await fs.promises.writeFile(filePath, buffer);
+
+  const baseUrl = process.env.BACKEND_URL || `http://localhost:${process.env.PORT || 4000}`;
+  // Asegurar que no haya doble slash
+  const url = `${baseUrl.replace(/\/$/, '')}/media/${fileName}`;
+  return url;
+}
+
+/**
+ * Subir archivo de media a Supabase Storage con Fallback Local
  */
 async function uploadMediaToSupabase(
   instanceId: string,
@@ -45,12 +66,11 @@ async function uploadMediaToSupabase(
   mimeType: string
 ): Promise<string | undefined> {
   try {
-    // Crear path único: instance_id/YYYY-MM/filename
+    // 1. Intentar subir a Supabase
     const date = new Date();
     const yearMonth = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
     const filePath = `${instanceId}/${yearMonth}/${fileName}`;
 
-    // Subir archivo
     const { data, error } = await supabase.storage
       .from('whatsapp-media')
       .upload(filePath, buffer, {
@@ -58,19 +78,24 @@ async function uploadMediaToSupabase(
         upsert: false,
       });
 
-    if (error) {
-      console.error('Error uploading to Supabase:', error);
-      return undefined;
+    if (!error && data) {
+      const { data: urlData } = supabase.storage
+        .from('whatsapp-media')
+        .getPublicUrl(filePath);
+
+      if (urlData.publicUrl) return urlData.publicUrl;
     }
 
-    // Obtener URL pública
-    const { data: urlData } = supabase.storage
-      .from('whatsapp-media')
-      .getPublicUrl(filePath);
-
-    return urlData.publicUrl;
+    console.warn('Supabase upload failed or returned no URL, falling back to local storage.');
   } catch (error) {
     console.error('Error in uploadMediaToSupabase:', error);
+  }
+
+  // 2. Fallback: Guardar localmente
+  try {
+    return await saveMediaLocally(buffer, fileName);
+  } catch (localError) {
+    console.error('Error saving media locally:', localError);
     return undefined;
   }
 }

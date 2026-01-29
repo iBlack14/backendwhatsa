@@ -46,6 +46,10 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 // ✅ Trust Proxy for Docker/Reverse Proxy (Easypanel)
 app.set('trust proxy', 1);
 
+// ✅ Serve static media files
+import path from 'path';
+app.use('/media', express.static(path.join(process.cwd(), 'media')));
+
 // Rate limiting general - DESHABILITADO para permitir envío/recepción ilimitada de mensajes
 // app.use('/api/', generalLimiter);
 
