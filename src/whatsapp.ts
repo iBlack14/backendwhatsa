@@ -245,8 +245,8 @@ export async function disconnectSession(clientId: string): Promise<void> {
       // Intentar cerrar el socket gracefuly
       if (session.sock) {
         // Solo intentar logout si el socket parece estar abierto o conectado
-        await session.sock.logout().catch(err => {
-          console.warn(`[${clientId}] ⚠️ Error during logout (cleanup will continue):`, err.message);
+        await session.sock.logout().catch((err: any) => {
+          console.warn(`[${clientId}] ⚠️ Error during logout (cleanup will continue):`, err?.message || err);
         });
 
         // También cerramos la conexión de WS si está abierta y no fue cerrada por logout
