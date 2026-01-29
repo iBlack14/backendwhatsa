@@ -12,6 +12,7 @@
     "@hapi/boom": "^10.0.1",
     "@supabase/supabase-js": "^2.93.0",
     "@types/socket.io": "^3.0.1",
+    "@types/uuid": "^10.0.0",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "axios": "^1.8.4",
     "cors": "^2.8.5",
@@ -26,7 +27,8 @@
     "qrcode-terminal": "^0.12.0",
     "socket.io": "^4.8.1",
     "socks-proxy-agent": "^8.0.4",
-    "supabase": "^2.53.6"
+    "supabase": "^2.53.6",
+    "uuid": "^13.0.0"
   },
   "devDependencies": {
     "@types/cors": "^2.8.17",

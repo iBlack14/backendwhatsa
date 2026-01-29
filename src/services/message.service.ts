@@ -1,5 +1,6 @@
 import * as dotenv from 'dotenv';
 import { supabase } from '../lib/supabase';
+import { storageService } from './storage.service';
 
 dotenv.config();
 
@@ -432,6 +433,20 @@ export class MessageService {
         return { success: false, error: 'Failed to send image' };
       }
 
+      // Subir imagen si es Base64
+      let finalMediaUrl = imageUrl;
+      if (imageUrl.startsWith('data:')) {
+        const uploadedUrl = await storageService.uploadBase64(imageUrl, instanceId);
+        if (uploadedUrl) {
+          finalMediaUrl = uploadedUrl;
+        } else {
+          // Fallback: Si falla la subida, no guardamos el data URI en DB para no saturarla
+          // Opcional: Podríamos guardarlo si es crítico, pero mejor mantener DB limpia
+          console.warn('Failed to upload outgoing image, message will be saved without media_url');
+          finalMediaUrl = undefined as any;
+        }
+      }
+
       // Guardar el mensaje en la base de datos
       const messageData: Message = {
         instance_id: instanceId,
@@ -439,7 +454,7 @@ export class MessageService {
         message_id: sentMessage.key.id || `msg_${Date.now()}`,
         message_text: caption || '',
         message_type: 'image',
-        media_url: imageUrl.startsWith('data:') ? undefined : imageUrl, // No guardar base64 gigante en media_url si es posible, o guardarlo si es necesario
+        media_url: finalMediaUrl,
         from_me: true,
         timestamp: new Date(),
         is_read: false,
@@ -480,6 +495,18 @@ export class MessageService {
         return { success: false, error: 'Failed to send audio' };
       }
 
+      // Subir audio si es Base64
+      let finalAudioUrl = audioUrl;
+      if (audioUrl.startsWith('data:')) {
+        const uploadedUrl = await storageService.uploadBase64(audioUrl, instanceId);
+        if (uploadedUrl) {
+          finalAudioUrl = uploadedUrl;
+        } else {
+          console.warn('Failed to upload outgoing audio, message will be saved without media_url');
+          finalAudioUrl = undefined as any;
+        }
+      }
+
       // Guardar el mensaje en la base de datos
       const messageData: Message = {
         instance_id: instanceId,
@@ -487,7 +514,7 @@ export class MessageService {
         message_id: sentMessage.key.id || `msg_${Date.now()}`,
         message_text: '',
         message_type: 'voice',
-        media_url: audioUrl.startsWith('data:') ? undefined : audioUrl,
+        media_url: finalAudioUrl,
         from_me: true,
         timestamp: new Date(),
         is_read: false,
