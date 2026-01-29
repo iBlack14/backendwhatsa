@@ -125,7 +125,7 @@ function extractMessageText(message: any): string | undefined {
   if (!realMessage) return undefined;
 
   // Texto simple
-  if (realMessage.conversation) return realMessage.conversation;
+  if (realMessage.conversation && realMessage.conversation !== '[Media]') return realMessage.conversation;
 
   // Texto extendido (con formato, links, menciones, etc)
   if (realMessage.extendedTextMessage?.text) return realMessage.extendedTextMessage.text;
