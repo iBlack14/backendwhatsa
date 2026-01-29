@@ -241,8 +241,28 @@ export function getAllSessions() { return Array.from(sessions.values()); }
 export async function disconnectSession(clientId: string): Promise<void> {
   const session = sessions.get(clientId);
   if (session) {
-    await session.sock.logout();
-    sessions.delete(clientId);
+    try {
+      // Intentar cerrar el socket gracefuly
+      if (session.sock) {
+        // Solo intentar logout si el socket parece estar abierto o conectado
+        await session.sock.logout().catch(err => {
+          console.warn(`[${clientId}] ⚠️ Error during logout (cleanup will continue):`, err.message);
+        });
+
+        // También cerramos la conexión de WS si está abierta y no fue cerrada por logout
+        try {
+          session.sock.end(undefined);
+        } catch (e) { }
+      }
+    } catch (error) {
+      console.error(`[${clientId}] ❌ Error disconnecting session:`, error);
+    } finally {
+      // SIEMPRE eliminar la sesión del mapa, pase lo que pase
+      sessions.delete(clientId);
+      console.log(`[${clientId}] 🗑️ Session removed from memory.`);
+    }
+  } else {
+    console.log(`[${clientId}] ⚠️ Session not found to disconnect.`);
   }
 }
 
