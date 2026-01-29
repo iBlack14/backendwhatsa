@@ -215,6 +215,7 @@ router.post('/api/generate-qr', async (req: Request, res: Response) => {
     const existingSession = getSession(clientId);
 
     if (existingSession && existingSession.state === 'Connected') {
+      console.log(`[${clientId}] ⚠️ Session already connected, cannot generate QR`);
       return res.status(400).json({
         error: 'Session is already connected',
         state: existingSession.state
@@ -223,10 +224,14 @@ router.post('/api/generate-qr', async (req: Request, res: Response) => {
 
     // Si existe pero está desconectada, desconectarla primero
     if (existingSession) {
+      console.log(`[${clientId}] 🔌 Disconnecting existing session before regenerating QR`);
       await disconnectSession(clientId);
+      // Esperar un momento para asegurar limpieza completa
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
 
     // Crear nueva sesión (generará QR automáticamente)
+    console.log(`[${clientId}] 🔄 Creating new session for QR generation`);
     await createWhatsAppSession(clientId);
 
     res.json({
