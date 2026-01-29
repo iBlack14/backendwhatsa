@@ -12,7 +12,6 @@ import QRCode from 'qrcode';
 import { WhatsAppSession } from './types';
 import { proxyService } from './services/proxy.service';
 import { messageService } from './services/message.service';
-import { storageService } from './services/storage.service';
 import { contactService } from './services/contact.service';
 import { createClient } from '@supabase/supabase-js';
 import { useSupabaseAuthState } from './auth/SupabaseAuthState';
@@ -36,8 +35,45 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000); // Cada 5 minutos
 
-// function uploadMediaToSupabase removed
+/**
+ * Subir archivo de media a Supabase Storage
+ */
+async function uploadMediaToSupabase(
+  instanceId: string,
+  buffer: Buffer,
+  fileName: string,
+  mimeType: string
+): Promise<string | undefined> {
+  try {
+    // Crear path único: instance_id/YYYY-MM/filename
+    const date = new Date();
+    const yearMonth = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+    const filePath = `${instanceId}/${yearMonth}/${fileName}`;
 
+    // Subir archivo
+    const { data, error } = await supabase.storage
+      .from('whatsapp-media')
+      .upload(filePath, buffer, {
+        contentType: mimeType,
+        upsert: false,
+      });
+
+    if (error) {
+      console.error('Error uploading to Supabase:', error);
+      return undefined;
+    }
+
+    // Obtener URL pública
+    const { data: urlData } = supabase.storage
+      .from('whatsapp-media')
+      .getPublicUrl(filePath);
+
+    return urlData.publicUrl;
+  } catch (error) {
+    console.error('Error in uploadMediaToSupabase:', error);
+    return undefined;
+  }
+}
 
 /**
  * Desempaqueta mensajes de wrappers como ephemeralMessage, viewOnceMessage, etc.
@@ -246,32 +282,32 @@ async function processAndSaveMessage(clientId: string, sock: WASocket, msg: WAMe
         fileName = (content.imageMessage as any).fileName || `image_${Date.now()}.jpg`;
         mimeType = content.imageMessage.mimetype || 'image/jpeg';
         const buffer = await downloadMediaMessage(msg, 'buffer', {});
-        mediaUrl = await storageService.uploadFile(buffer as Buffer, clientId, mimeType, fileName);
+        mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
       } else if ((messageType === 'video' || messageType === 'view_once_video') && content?.videoMessage) {
         fileName = (content.videoMessage as any).fileName || `video_${Date.now()}.mp4`;
         mimeType = content.videoMessage.mimetype || 'video/mp4';
         const buffer = await downloadMediaMessage(msg, 'buffer', {});
-        mediaUrl = await storageService.uploadFile(buffer as Buffer, clientId, mimeType, fileName);
+        mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
       } else if (messageType === 'audio' && content?.audioMessage) {
         fileName = `audio_${Date.now()}.mp3`;
         mimeType = 'audio/mpeg';
         const buffer = await downloadMediaMessage(msg, 'buffer', {});
-        mediaUrl = await storageService.uploadFile(buffer as Buffer, clientId, mimeType, fileName);
+        mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
       } else if (messageType === 'voice' && content?.audioMessage) {
         fileName = `voice_${Date.now()}.ogg`;
         mimeType = 'audio/ogg';
         const buffer = await downloadMediaMessage(msg, 'buffer', {});
-        mediaUrl = await storageService.uploadFile(buffer as Buffer, clientId, mimeType, fileName);
+        mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
       } else if (messageType === 'document' && content?.documentMessage) {
         fileName = content.documentMessage.fileName || `document_${Date.now()}`;
         mimeType = content.documentMessage.mimetype || 'application/octet-stream';
         const buffer = await downloadMediaMessage(msg, 'buffer', {});
-        mediaUrl = await storageService.uploadFile(buffer as Buffer, clientId, mimeType, fileName);
+        mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
       } else if (messageType === 'sticker' && content?.stickerMessage) {
         fileName = `sticker_${Date.now()}.webp`;
         mimeType = content.stickerMessage.mimetype || 'image/webp';
         const buffer = await downloadMediaMessage(msg, 'buffer', {});
-        mediaUrl = await storageService.uploadFile(buffer as Buffer, clientId, mimeType, fileName);
+        mediaUrl = await uploadMediaToSupabase(clientId, buffer as Buffer, fileName, mimeType);
       }
     } catch (mediaError) {
       // Ignorar error de descarga si el mensaje aún está cifrado (ausente)
