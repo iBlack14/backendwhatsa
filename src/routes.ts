@@ -230,6 +230,13 @@ router.post('/api/generate-qr', async (req: Request, res: Response) => {
       await new Promise(resolve => setTimeout(resolve, 500));
     }
 
+    // 🧹 Limpiar credenciales antiguas de la base de datos para forzar nuevo QR
+    console.log(`[${clientId}] 🧹 Clearing old credentials from DB to force new QR`);
+    await supabase
+      .from('whatsapp_sessions')
+      .delete()
+      .eq('session_id', clientId);
+
     // Crear nueva sesión (generará QR automáticamente)
     console.log(`[${clientId}] 🔄 Creating new session for QR generation`);
     await createWhatsAppSession(clientId);
