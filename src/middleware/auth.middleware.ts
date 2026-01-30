@@ -12,15 +12,15 @@ const supabase = createClient(
  */
 export async function validateApiKey(req: Request, res: Response, next: NextFunction) {
   const startTime = Date.now();
-  
+
   try {
     const apiKey = req.headers.authorization?.replace('Bearer ', '');
 
     if (!apiKey) {
       // ✅ Log intento sin API key
       await logFailedAttempt(req, null, 'No API key provided');
-      
-      return res.status(401).json({ 
+
+      return res.status(401).json({
         error: 'API Key required',
         message: 'Please provide an API Key in the Authorization header'
       });
@@ -42,8 +42,8 @@ export async function validateApiKey(req: Request, res: Response, next: NextFunc
     if (error || !profile) {
       // ✅ Log API key inválida
       await logFailedAttempt(req, apiKey, 'Invalid API key');
-      
-      return res.status(401).json({ 
+
+      return res.status(401).json({
         error: 'Invalid API Key',
         message: 'The provided API Key is not valid or has been revoked'
       });
@@ -52,8 +52,8 @@ export async function validateApiKey(req: Request, res: Response, next: NextFunc
     // Verificar que tenga plan activo
     if (!profile.status_plan) {
       await logFailedAttempt(req, apiKey, 'No active plan');
-      
-      return res.status(403).json({ 
+
+      return res.status(403).json({
         error: 'No active plan',
         message: 'Please activate a plan to use the API'
       });
@@ -75,7 +75,7 @@ export async function validateApiKey(req: Request, res: Response, next: NextFunc
     next();
   } catch (error: any) {
     console.error('[AUTH] Error validating API Key:', error);
-    return res.status(500).json({ 
+    return res.status(500).json({
       error: 'Internal server error',
       message: 'Failed to validate API Key'
     });
@@ -119,8 +119,8 @@ async function logFailedAttempt(
   apiKey: string | null,
   reason: string
 ) {
-  console.warn(`[AUTH] ❌ Failed attempt: ${reason} - IP: ${req.ip} - Path: ${req.path}`);
-  
+  // console.warn(`[AUTH] ❌ Failed attempt: ${reason} - IP: ${req.ip} - Path: ${req.path}`);
+
   // Aquí podrías agregar lógica adicional como:
   // - Bloquear IP después de X intentos
   // - Enviar alerta de seguridad
@@ -133,10 +133,10 @@ async function logFailedAttempt(
  */
 export function optionalApiKey(req: Request, res: Response, next: NextFunction) {
   const apiKey = req.headers.authorization;
-  
+
   if (!apiKey) {
     return next();
   }
-  
+
   return validateApiKey(req, res, next);
 }

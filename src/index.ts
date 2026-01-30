@@ -13,31 +13,11 @@ const app = express();
 const httpServer = createServer(app);
 const PORT = Number(process.env.PORT) || 4000;
 
-// ✅ CORS restrictivo - Solo permitir frontend autorizado
-const allowedOrigins = [
-  process.env.FRONTEND_URL || 'http://localhost:3000',
-  'https://connect.blxkstudio.com', // Producción
-  'http://localhost:3000', // Desarrollo
-  'http://localhost:3001', // Desarrollo alternativo
-];
-
 app.use(cors({
-  origin: function (origin, callback) {
-    // Permitir requests sin origin (como Postman) solo en desarrollo
-    if (!origin && process.env.NODE_ENV === 'development') {
-      return callback(null, true);
-    }
-
-    if (!origin || allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      console.warn(`[CORS] ❌ Blocked request from unauthorized origin: ${origin}`);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
+  origin: true, // Permitir cualquier origen (para desarrollo multi-entorno)
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key'],
 }));
 
 app.use(express.json({ limit: '50mb' }));
