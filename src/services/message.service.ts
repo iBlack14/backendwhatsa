@@ -121,11 +121,20 @@ export class MessageService {
       // Para no romper lógica "sin afectar aplicativo", mantendremos la lógica pero optimizada:
       // Intentar update primero, si no existe (rows affect 0), entonces insert.
 
+      // 🧹 Normalizar JID para la tabla CHATS (quitar sufijos de dispositivo como :1, :88)
+      // Ejemplo: 51953576234:1@s.whatsapp.net -> 51953576234@s.whatsapp.net
+      let normalizedChatId = message.chat_id;
+      if (normalizedChatId.includes('@s.whatsapp.net') && normalizedChatId.includes(':')) {
+        const userPart = normalizedChatId.split('@')[0].split(':')[0];
+        normalizedChatId = `${userPart}@s.whatsapp.net`;
+      }
+
+      // Buscar si ya existe el chat con el ID normalizado
       const { data: currentChat } = await supabase
         .from('chats')
         .select('unread_count, chat_name, profile_pic_url')
         .eq('instance_id', message.instance_id)
-        .eq('chat_id', message.chat_id)
+        .eq('chat_id', normalizedChatId) // Usar siempre ID normalizado
         .single();
 
       const newUnreadCount = currentChat
@@ -133,37 +142,26 @@ export class MessageService {
         : (message.from_me ? 0 : 1);
 
       // LÓGICA DE NOMBRE DE CHAT CORREGIDA:
-      // 1. Si es mensaje ENTRANTE (!from_me) y tiene nombre, usamos ese nombre (CORRIGE nombres erróneos y actualiza contactos).
-      // 2. Si ya existe un nombre en DB y no tenemos uno mejor entrante, lo conservamos.
-      // 3. Si no hay nada, usamos el ID/Número.
-      // ⚠️ IMPORTANTE: Nunca usar message.sender_name si from_me=true, porque ese es TU nombre (ej. "Alonso"), no el del contacto.
-
-      let finalChatName = currentChat?.chat_name; // Por defecto: mantener el que existe
+      let finalChatName = currentChat?.chat_name;
 
       if (!message.from_me) {
-        // MENSAJE ENTRANTE (Lo que importa para el nombre del chat)
-
         if (message.sender_name) {
           const name = message.sender_name.trim();
-          // Validar: Que no sea ".", que no sea tu propio nombre común
           const isBadName = name === '.' || name.toLowerCase().includes('alonso huancas');
-
           if (!isBadName) {
-            finalChatName = name; // Nombre válido, lo usamos
+            finalChatName = name;
           }
         }
-
-        // Si no tenemos nombre válido y no hay nombre previo, el fallback final será el número (abajo)
       }
 
       if (!finalChatName) {
-        // Si aún no tenemos nombre (nuevo chat outgoing sin respuesta aun), usamos el número.
-        finalChatName = message.chat_id.split('@')[0];
+        // Fallback al número (usando el ID normalizado)
+        finalChatName = normalizedChatId.split('@')[0];
       }
 
       const upsertData = {
         instance_id: message.instance_id,
-        chat_id: message.chat_id,
+        chat_id: normalizedChatId, // Guardar SIEMPRE normalizado
         chat_type: chatData.chat_type,
         last_message_text: chatData.last_message_text,
         last_message_at: chatData.last_message_at,
