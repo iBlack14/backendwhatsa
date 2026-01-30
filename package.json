@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",
-    "@supabase/supabase-js": "^2.93.0",
+    "@supabase/supabase-js": "^2.93.3",
     "@types/socket.io": "^3.0.1",
     "@types/uuid": "^10.0.0",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
