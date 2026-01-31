@@ -13,7 +13,7 @@
 import makeWASocket, {
   DisconnectReason,
   WASocket,
-} from '@whiskeysockets/baileys';
+} from 'baileys';
 import { Boom } from '@hapi/boom';
 // @ts-ignore - QRCode no tiene tipos oficiales, funciona correctamente
 import QRCode from 'qrcode';

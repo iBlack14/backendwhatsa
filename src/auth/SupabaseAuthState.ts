@@ -1,11 +1,11 @@
 import {
-    AuthenticationCreds,
-    AuthenticationState,
-    SignalDataTypeMap,
-    initAuthCreds,
-    BufferJSON,
-    proto
-} from '@whiskeysockets/baileys';
+  AuthenticationCreds,
+  AuthenticationState,
+  SignalDataTypeMap,
+  initAuthCreds,
+  BufferJSON,
+  proto
+} from 'baileys';
 import { supabase } from '../lib/supabase';
 
 // Definir tipos para las claves de sesión

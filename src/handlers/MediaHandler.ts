@@ -5,7 +5,12 @@
  * de mensajes de WhatsApp a Supabase Storage (con fallback local).
  */
 
-import { downloadMediaMessage } from '@whiskeysockets/baileys';
+import {
+  WAMessage,
+  WASocket,
+  downloadMediaMessage,
+  proto
+} from 'baileys';
 import path from 'path';
 import fs from 'fs';
 import { supabase } from '../lib/supabase';

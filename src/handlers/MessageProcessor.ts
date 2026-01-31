@@ -1,4 +1,8 @@
-import { WASocket } from '@whiskeysockets/baileys';
+import {
+  WAMessage,
+  WASocket,
+  proto
+} from 'baileys';
 import {
     extractMessageText,
     detectMessageType,
